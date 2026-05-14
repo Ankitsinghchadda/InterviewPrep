@@ -1,0 +1,25 @@
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Build artifacts
+bin/
+tmp/
+*.exe
+*.test
+*.out
+
+# Test / coverage
+coverage.txt
+coverage.out
+*.prof
+
+# Vendored deps (if you ever run `go mod vendor`)
+vendor/
+
+# OS
+.DS_Store
+
+# Runtime data
+var/
