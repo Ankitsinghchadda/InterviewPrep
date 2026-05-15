@@ -1,16 +1,33 @@
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
-import { listCategories } from '@/services/categories'
+import {
+  createCategory,
+  getPublicCategory,
+  listCategories,
+  listPublicCategories,
+  type CreateCategoryInput,
+  type PublicCategoryDetail,
+} from '@/services/categories'
 import {
   createQuestion,
   deleteQuestion,
+  findSimilarQuestions,
+  generateAnswerDraft,
+  generateQuestionExplanation,
+  generateQuestions,
+  getPublicQuestion,
   getQuestion,
+  getSmartRecommendations,
   listQuestions,
-  listRecommendedQuestions,
   type CreateQuestionInput,
+  type FindSimilarInput,
+  type GenerateAnswerInput,
+  type GenerateQuestionsInput,
   type ListQuestionsParams,
+  type QuestionExplanation,
 } from '@/services/questions'
+import { getStatsOverview } from '@/services/stats'
 import {
   getProfile,
   upsertProfile,
@@ -27,7 +44,17 @@ import {
   submitInterviewAnswer,
   type StartInterviewInput,
 } from '@/services/interviews'
-import type { CategoryKind, Interview, Profile, Submission } from '@/types'
+import type {
+  Category,
+  CategoryKind,
+  Interview,
+  Profile,
+  Question,
+  SimilarQuestion,
+  SmartRecommendations,
+  StatsOverview,
+  Submission,
+} from '@/types'
 
 export interface RecordingPayload {
   blob: Blob
@@ -39,6 +66,40 @@ export function useCategories(kind?: CategoryKind) {
     queryKey: ['categories', kind ?? 'all'],
     queryFn: () => listCategories(kind),
     staleTime: 5 * 60_000,
+  })
+}
+
+// usePublicCategories: no-auth list of all categories. Powers the public
+// /topics index page.
+export function usePublicCategories() {
+  return useQuery<Category[]>({
+    queryKey: ['categories', 'public'],
+    queryFn: () => listPublicCategories(),
+    staleTime: 5 * 60_000,
+  })
+}
+
+// usePublicCategory: no-auth fetch of a single category + its public
+// questions. Powers /topics/:slug (the topic landing page).
+export function usePublicCategory(slug: string | undefined) {
+  return useQuery<PublicCategoryDetail | null>({
+    queryKey: ['categories', 'public', slug],
+    queryFn: () => getPublicCategory(slug!),
+    enabled: Boolean(slug),
+    staleTime: 5 * 60_000,
+  })
+}
+
+// useCreateCategory is admin-only on the server. The button that calls it is
+// only rendered for admins, but a 403 here is still possible and should be
+// surfaced to the caller via the standard mutation error path.
+export function useCreateCategory() {
+  const qc = useQueryClient()
+  return useMutation<Category, Error, CreateCategoryInput>({
+    mutationFn: (input) => createCategory(input),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['categories'] })
+    },
   })
 }
 
@@ -57,12 +118,88 @@ export function useQuestion(id: string | undefined) {
   })
 }
 
+// usePublicQuestion fetches a question via the no-auth public endpoint.
+// Accepts either a UUID or a slug. Used on /questions/:id which is rendered
+// for both signed-in and signed-out visitors (the page itself gates the
+// answer/practice surfaces based on auth status).
+export function usePublicQuestion(idOrSlug: string | undefined) {
+  return useQuery({
+    queryKey: ['question', 'public', idOrSlug],
+    queryFn: () => getPublicQuestion(idOrSlug!),
+    enabled: Boolean(idOrSlug),
+    staleTime: 5 * 60_000,
+  })
+}
+
 export function useCreateQuestion() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (input: CreateQuestionInput) => createQuestion(input),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['questions'] })
+    },
+  })
+}
+
+// useSimilarQuestions powers the live "looks similar to" panel in the create
+// dialog. Debounces the title+body so we don't hammer the embeddings API on
+// every keystroke, and short-circuits when the title is shorter than 8 chars.
+export function useSimilarQuestions(input: FindSimilarInput, debounceMs = 400) {
+  const [debounced, setDebounced] = useState<FindSimilarInput>(input)
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(input), debounceMs)
+    return () => clearTimeout(t)
+  }, [input.title, input.body, debounceMs])
+
+  const title = debounced.title.trim()
+  return useQuery<SimilarQuestion[]>({
+    queryKey: ['questions', 'similar', title, (debounced.body ?? '').trim()],
+    queryFn: () => findSimilarQuestions(debounced),
+    enabled: title.length >= 8,
+    staleTime: 30_000,
+  })
+}
+
+// useGenerateAnswerDraft drafts a reference answer for a question the user is
+// composing. Used by the "Generate" button; the caller writes the result back
+// into the form's textarea.
+export function useGenerateAnswerDraft() {
+  return useMutation<string, Error, GenerateAnswerInput>({
+    mutationFn: (input) => generateAnswerDraft(input),
+  })
+}
+
+// useGenerateQuestions asks the server to AI-author a batch of questions for
+// the given categories and persist them as public catalog rows. The empty
+// state on the Questions page uses this so users can fill skills with no
+// curated content. Invalidates the questions list on success.
+export function useGenerateQuestions() {
+  const qc = useQueryClient()
+  return useMutation<Question[], Error, GenerateQuestionsInput>({
+    mutationFn: (input) => generateQuestions(input),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['questions'] })
+    },
+  })
+}
+
+// useGenerateExplanation: lazily generates the learner-facing explanation
+// (summary + markdown body, possibly with a mermaid diagram) and folds the
+// result into the cached question so the UI re-renders without a refetch.
+export function useGenerateExplanation(questionId: string) {
+  const qc = useQueryClient()
+  return useMutation<QuestionExplanation, Error>({
+    mutationFn: () => generateQuestionExplanation(questionId),
+    onSuccess: (data) => {
+      qc.setQueryData<Question | null>(['question', questionId], (prev) =>
+        prev
+          ? {
+              ...prev,
+              explanationSummary: data.summary,
+              explanationMarkdown: data.markdown,
+            }
+          : prev,
+      )
     },
   })
 }
@@ -232,10 +369,18 @@ export function useSubmitInterviewAnswer(interviewId: string, questionId: string
   })
 }
 
-export function useRecommendedQuestions() {
-  return useQuery({
-    queryKey: ['questions', 'recommended'],
-    queryFn: () => listRecommendedQuestions(),
+export function useSmartRecommendations() {
+  return useQuery<SmartRecommendations>({
+    queryKey: ['questions', 'recommendations'],
+    queryFn: () => getSmartRecommendations(),
+    staleTime: 60_000,
+  })
+}
+
+export function useStatsOverview() {
+  return useQuery<StatsOverview | null>({
+    queryKey: ['stats', 'overview'],
+    queryFn: () => getStatsOverview(),
     staleTime: 60_000,
   })
 }
@@ -264,7 +409,8 @@ export function useUpsertProfile() {
     mutationFn: (input: UpsertProfileInput) => upsertProfile(input),
     onSuccess: (p) => {
       qc.setQueryData<Profile>(['profile'], p)
-      void qc.invalidateQueries({ queryKey: ['questions', 'recommended'] })
+      void qc.invalidateQueries({ queryKey: ['questions', 'recommendations'] })
+      void qc.invalidateQueries({ queryKey: ['stats', 'overview'] })
     },
   })
 }

@@ -11,6 +11,7 @@ type Repository struct {
 	Interviews  *InterviewRepo
 	Submissions *SubmissionRepo
 	Profiles    *ProfileRepo
+	Stats       *StatsRepo
 }
 
 func New(db *sql.DB) *Repository {
@@ -23,5 +24,6 @@ func New(db *sql.DB) *Repository {
 		Interviews:  &InterviewRepo{DB: db},
 		Submissions: &SubmissionRepo{DB: db},
 		Profiles:    &ProfileRepo{DB: db},
+		Stats:       &StatsRepo{DB: db},
 	}
 }

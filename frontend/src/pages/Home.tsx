@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   ArrowRight,
@@ -5,6 +6,7 @@ import {
   ListChecks,
   Mic,
   PlayCircle,
+  Plus,
   Sparkles,
   TriangleAlert,
   UserCircle2,
@@ -14,12 +16,20 @@ import { useAuth } from '@/auth/AuthContext'
 import {
   useMyInterviews,
   useProfile,
-  useRecommendedQuestions,
+  useSmartRecommendations,
+  useStatsOverview,
 } from '@/hooks/queries'
-import type { Interview, Question } from '@/types'
+import type { Interview } from '@/types'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+
+import { CategoryPerformance } from '@/components/dashboard/CategoryPerformance'
+import { DifficultyMix } from '@/components/dashboard/DifficultyMix'
+import { ScoreTrendChart } from '@/components/dashboard/ScoreTrendChart'
+import { SmartRecommendations } from '@/components/dashboard/SmartRecommendations'
+import { StatsHero } from '@/components/dashboard/StatsHero'
+import { ThemesList } from '@/components/dashboard/ThemesList'
 
 const QUICK_ACTIONS = [
   {
@@ -48,25 +58,28 @@ const QUICK_ACTIONS = [
 export function Home() {
   const { user } = useAuth()
   const { data: profile } = useProfile()
-  const { data: recommended, isLoading: recsLoading } = useRecommendedQuestions()
+  const { data: stats, isLoading: statsLoading } = useStatsOverview()
+  const { data: recs, isLoading: recsLoading } = useSmartRecommendations()
   const { data: interviews } = useMyInterviews()
 
   const firstName = user?.name?.split(' ')[0] || 'there'
   const onboarded = Boolean(profile?.onboardedAt)
-  const recentInterviews = (interviews ?? []).slice(0, 3)
+  const allInterviews = interviews ?? []
 
   return (
     <section className="space-y-10">
       <header>
         <p className="text-sm text-muted-foreground">Welcome back</p>
-        <h1 className="mt-1 text-3xl font-bold tracking-tight sm:text-4xl">
-          Hey {firstName} — {onboarded ? 'what do you want to drill today?' : 'let’s tailor this to you.'}
+        <h1 className="mt-1 text-2xl font-bold tracking-tight sm:text-3xl md:text-4xl">
+          Hey {firstName} — {onboarded ? 'here’s your progress.' : 'let’s tailor this to you.'}
         </h1>
       </header>
 
       {!onboarded && <OnboardingNudge />}
 
-      <div className="grid gap-4 md:grid-cols-3">
+      <StatsHero stats={stats} loading={statsLoading} />
+
+      <div className="grid gap-6 md:grid-cols-3">
         {QUICK_ACTIONS.map(({ icon: Icon, title, body, to, cta }) => (
           <Card key={title} className="flex flex-col">
             <CardHeader>
@@ -87,80 +100,98 @@ export function Home() {
         ))}
       </div>
 
-      {onboarded && (
-        <section className="space-y-3">
-          <div className="flex items-baseline justify-between">
-            <div>
-              <h2 className="text-lg font-semibold tracking-tight">Recommended for you</h2>
-              <p className="text-sm text-muted-foreground">
-                Curated based on{' '}
-                <span className="text-foreground">{profile?.targetRole || 'your role'}</span>
-                {profile?.techStack.length ? (
-                  <>
-                    {' '}
-                    + {profile.techStack.slice(0, 3).join(', ')}
-                  </>
-                ) : null}
-                .
-              </p>
-            </div>
-            <Button asChild variant="ghost" size="sm">
-              <Link to="/questions">View all</Link>
-            </Button>
-          </div>
-          {recsLoading ? (
-            <RecsSkeleton />
-          ) : (recommended ?? []).length === 0 ? (
-            <Card>
-              <CardContent className="py-8 text-center text-sm text-muted-foreground">
-                Nothing matched your profile yet — try broadening your tech stack in{' '}
-                <Link to="/onboarding" className="text-brand-300 hover:underline">
-                  your profile
-                </Link>
-                .
-              </CardContent>
-            </Card>
-          ) : (
-            <div className="grid gap-3 md:grid-cols-2">
-              {recommended!.map((q) => (
-                <RecQuestionCard key={q.id} question={q} />
-              ))}
-            </div>
-          )}
-        </section>
-      )}
+      <SmartRecommendations recs={recs} loading={recsLoading} />
 
-      <section className="space-y-3">
-        <div className="flex items-baseline justify-between">
+      <div className="grid gap-6 lg:grid-cols-3">
+        <div className="lg:col-span-2">
+          <ScoreTrendChart trend={stats?.trend ?? []} loading={statsLoading} />
+        </div>
+        <DifficultyMix buckets={stats?.difficultyDistribution} loading={statsLoading} />
+      </div>
+
+      <CategoryPerformance data={stats?.categories} loading={statsLoading} />
+
+      <div className="grid gap-6 md:grid-cols-2">
+        <ThemesList variant="strengths" themes={stats?.themes.strengths} loading={statsLoading} />
+        <ThemesList variant="improvements" themes={stats?.themes.improvements} loading={statsLoading} />
+      </div>
+
+      <RecentInterviews interviews={allInterviews} />
+    </section>
+  )
+}
+
+const INTERVIEW_PAGE_SIZE = 5
+
+function RecentInterviews({ interviews }: { interviews: Interview[] }) {
+  const [visible, setVisible] = useState(INTERVIEW_PAGE_SIZE)
+  const shown = interviews.slice(0, visible)
+  const hasMore = interviews.length > visible
+
+  return (
+    <section className="space-y-4">
+      <div className="flex items-baseline justify-between">
+        <div>
           <h2 className="text-lg font-semibold tracking-tight">Recent interviews</h2>
-          {recentInterviews.length > 0 && (
-            <Button asChild variant="ghost" size="sm">
-              <Link to="/interview">New interview</Link>
-            </Button>
+          {interviews.length > 0 && (
+            <p className="text-sm text-muted-foreground">
+              Showing {shown.length} of {interviews.length}
+            </p>
           )}
         </div>
-        {recentInterviews.length === 0 ? (
-          <Card>
-            <CardContent className="py-10 text-center">
-              <Mic className="mx-auto mb-3 size-8 text-muted-foreground" />
-              <p className="text-sm text-muted-foreground">
-                No mock interviews yet. Start one and your results will show up here.
-              </p>
-              <Button asChild variant="brand" size="sm" className="mt-4">
-                <Link to="/interview">
-                  Start a mock interview <ArrowRight className="size-4" />
-                </Link>
-              </Button>
-            </CardContent>
-          </Card>
-        ) : (
-          <div className="space-y-2">
-            {recentInterviews.map((iv) => (
+        {interviews.length > 0 && (
+          <Button asChild variant="brand" size="sm">
+            <Link to="/interview">
+              <Plus className="size-4" /> New interview
+            </Link>
+          </Button>
+        )}
+      </div>
+      {interviews.length === 0 ? (
+        <Card>
+          <CardContent className="py-10 text-center">
+            <Mic className="mx-auto mb-3 size-8 text-muted-foreground" />
+            <p className="text-sm text-muted-foreground">
+              No mock interviews yet. Start one and your results will show up here.
+            </p>
+            <Button asChild variant="brand" size="sm" className="mt-4">
+              <Link to="/interview">
+                Start a mock interview <ArrowRight className="size-4" />
+              </Link>
+            </Button>
+          </CardContent>
+        </Card>
+      ) : (
+        <>
+          <div className="space-y-3">
+            {shown.map((iv) => (
               <InterviewRow key={iv.id} interview={iv} />
             ))}
           </div>
-        )}
-      </section>
+          {hasMore && (
+            <div className="flex justify-center pt-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setVisible((v) => v + INTERVIEW_PAGE_SIZE)}
+              >
+                Show more
+              </Button>
+            </div>
+          )}
+          {!hasMore && visible > INTERVIEW_PAGE_SIZE && (
+            <div className="flex justify-center pt-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setVisible(INTERVIEW_PAGE_SIZE)}
+              >
+                Show less
+              </Button>
+            </div>
+          )}
+        </>
+      )}
     </section>
   )
 }
@@ -181,7 +212,7 @@ function OnboardingNudge() {
           </CardDescription>
         </CardHeader>
         <div className="flex items-center px-6 pb-6 md:py-6">
-          <Button asChild variant="brand">
+          <Button asChild variant="brand" className="w-full sm:w-auto">
             <Link to="/onboarding">
               <UserCircle2 className="size-4" /> Set up profile
               <ArrowRight className="size-4" />
@@ -190,36 +221,6 @@ function OnboardingNudge() {
         </div>
       </div>
     </Card>
-  )
-}
-
-function RecsSkeleton() {
-  return (
-    <div className="grid gap-3 md:grid-cols-2">
-      {Array.from({ length: 4 }).map((_, i) => (
-        <div key={i} className="h-24 animate-pulse rounded-xl border border-border/40 bg-card/40" />
-      ))}
-    </div>
-  )
-}
-
-function RecQuestionCard({ question }: { question: Question }) {
-  return (
-    <Link to={`/questions/${question.id}`}>
-      <Card className="h-full transition-colors hover:border-brand-500/40">
-        <CardHeader>
-          <div className="mb-2 flex flex-wrap items-center gap-1.5">
-            <Badge variant="brand">{question.difficulty}</Badge>
-            {question.categories.slice(0, 3).map((c) => (
-              <Badge key={c} variant="outline" className="text-muted-foreground">
-                {c}
-              </Badge>
-            ))}
-          </div>
-          <CardTitle className="text-base leading-snug">{question.title}</CardTitle>
-        </CardHeader>
-      </Card>
-    </Link>
   )
 }
 
@@ -249,12 +250,12 @@ function InterviewRow({ interview }: { interview: Interview }) {
     <Link to={`/interview/${interview.id}`}>
       <Card className="transition-colors hover:border-brand-500/40">
         <CardHeader className="flex flex-row items-center justify-between gap-3 space-y-0 py-4">
-          <div className="flex items-center gap-3">
-            <div className="grid size-9 place-items-center rounded-md bg-muted text-muted-foreground">
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="grid size-9 shrink-0 place-items-center rounded-md bg-muted text-muted-foreground">
               <StatusIcon className="size-4" />
             </div>
-            <div>
-              <div className="flex flex-wrap items-center gap-2">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                 <span className="text-sm font-medium capitalize">{interview.status.replace('_', ' ')}</span>
                 <Badge variant="outline" className="text-muted-foreground">
                   {modeLabel}
@@ -267,7 +268,7 @@ function InterviewRow({ interview }: { interview: Interview }) {
             </div>
           </div>
           {score != null && (
-            <div className={`font-mono text-lg font-bold ${tone}`}>{score}</div>
+            <div className={`shrink-0 font-mono text-lg font-bold ${tone}`}>{score}</div>
           )}
         </CardHeader>
       </Card>

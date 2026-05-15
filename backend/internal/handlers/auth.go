@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/Ankitsinghchadda/InterviewPrep/internal/auth"
+	"github.com/Ankitsinghchadda/InterviewPrep/internal/models"
 	"github.com/Ankitsinghchadda/InterviewPrep/internal/repository"
 	"github.com/Ankitsinghchadda/InterviewPrep/pkg/response"
 )
@@ -19,6 +20,7 @@ type AuthHandler struct {
 	Cookies     auth.CookieConfig
 	FrontendURL string
 	DefaultPath string
+	AdminEmails map[string]struct{}
 }
 
 // Login starts the Google OAuth flow. Sets a state cookie + optional post-login redirect cookie,
@@ -123,7 +125,9 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 	response.OK(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-// Me returns the authenticated user.
+// Me returns the authenticated user with an `isAdmin` flag derived from the
+// ADMIN_EMAILS allow-list. The flag is informational only — the backend still
+// enforces admin gating on every admin route.
 func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 	uid, ok := auth.UserID(r.Context())
 	if !ok {
@@ -135,7 +139,13 @@ func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 		response.Err(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
-	response.OK(w, http.StatusOK, user)
+	response.OK(w, http.StatusOK, struct {
+		*models.User
+		IsAdmin bool `json:"isAdmin"`
+	}{
+		User:    user,
+		IsAdmin: auth.IsAdmin(r.Context(), h.AdminEmails),
+	})
 }
 
 func (h *AuthHandler) failRedirect(w http.ResponseWriter, r *http.Request, reason string) {

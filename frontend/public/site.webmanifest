@@ -1,0 +1,21 @@
+{
+  "name": "10xInterview — AI Mock Interviews",
+  "short_name": "10xInterview",
+  "description": "Practice real interview questions, record your answers, and get instant AI feedback.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#0a0a0f",
+  "theme_color": "#863bff",
+  "categories": ["education", "productivity"],
+  "lang": "en-US",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

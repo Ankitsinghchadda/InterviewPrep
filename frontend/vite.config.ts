@@ -11,6 +11,22 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
   },
+  // Mermaid v11 lazy-loads each diagram type via dynamic `import('./chunks/...')`.
+  // When the app is served behind an SPA fallback, those chunk URLs can resolve
+  // to index.html and the browser refuses them with a MIME error. Folding every
+  // mermaid module into a single chunk eliminates the lazy imports.
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('node_modules/mermaid')) return 'mermaid'
+        },
+      },
+    },
+  },
+  optimizeDeps: {
+    include: ['mermaid'],
+  },
   server: {
     port: 5173,
     strictPort: true,

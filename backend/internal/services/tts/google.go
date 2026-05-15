@@ -5,12 +5,17 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	texttospeech "cloud.google.com/go/texttospeech/apiv1"
 	ttspb "cloud.google.com/go/texttospeech/apiv1/texttospeechpb"
 
 	"cloud.google.com/go/storage"
 )
+
+// ttsByteLimit is a few hundred bytes shy of Google TTS's 5000-byte input cap
+// so we have headroom for any whitespace normalization the API does internally.
+const ttsByteLimit = 4800
 
 // Google is a Synthesizer backed by Cloud Text-to-Speech + GCS. The TTS
 // produces MP3 bytes which are then written to the configured public bucket;
@@ -64,6 +69,7 @@ func (g *Google) Synthesize(ctx context.Context, questionID, text string) (strin
 	if questionID == "" {
 		return "", errors.New("tts: empty question id")
 	}
+	text = truncateForTTS(text, ttsByteLimit)
 
 	// Voice locale is derived from the voice name's "en-US-..." prefix so
 	// callers only need to set TTS_VOICE.
@@ -102,6 +108,38 @@ func (g *Google) Synthesize(ctx context.Context, questionID, text string) (strin
 	}
 
 	return fmt.Sprintf("https://storage.googleapis.com/%s/%s", g.bucket, key), nil
+}
+
+// truncateForTTS shortens `text` to at most `limit` bytes for the Google TTS
+// API's 5000-byte input cap. Prefers the last sentence terminator (. ! ?)
+// before the limit so the cut sounds natural; otherwise falls back to the
+// last word boundary, and finally to a rune-safe hard cut. An ellipsis is
+// appended so the listener can tell the reference was abridged.
+func truncateForTTS(text string, limit int) string {
+	if len(text) <= limit {
+		return text
+	}
+	// Reserve room for the ellipsis suffix.
+	const suffix = "…"
+	budget := limit - len(suffix)
+	if budget <= 0 {
+		return suffix
+	}
+
+	cut := text[:budget]
+	// Sentence boundary preferred.
+	if i := strings.LastIndexAny(cut, ".!?"); i > budget/2 {
+		return text[:i+1] + " " + suffix
+	}
+	// Word boundary next.
+	if i := strings.LastIndexAny(cut, " \n\t"); i > budget/2 {
+		return strings.TrimRight(text[:i], " \n\t") + suffix
+	}
+	// Hard cut at a UTF-8 rune boundary.
+	for budget > 0 && !utf8.RuneStart(text[budget]) {
+		budget--
+	}
+	return text[:budget] + suffix
 }
 
 // languageFromVoice extracts "en-US" from a name like "en-US-Neural2-D". The

@@ -15,9 +15,49 @@ import {
 
 import { useAuth } from '@/auth/AuthContext'
 import { googleLoginURL } from '@/services/auth'
+import { useSEO } from '@/hooks/useSEO'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+
+const LANDING_JSONLD = {
+  '@context': 'https://schema.org',
+  '@type': 'FAQPage',
+  mainEntity: [
+    {
+      '@type': 'Question',
+      name: 'What is 10xInterview?',
+      acceptedAnswer: {
+        '@type': 'Answer',
+        text: '10xInterview is an AI-powered mock interview platform. Practice real interview questions out loud, record your answers, and get honest feedback scored 0–100 from a Vertex AI agent.',
+      },
+    },
+    {
+      '@type': 'Question',
+      name: 'Is 10xInterview free?',
+      acceptedAnswer: {
+        '@type': 'Answer',
+        text: 'Yes — free to try with no credit card required. Sign in with Google and start your first mock interview in under a minute.',
+      },
+    },
+    {
+      '@type': 'Question',
+      name: 'Which interview topics are covered?',
+      acceptedAnswer: {
+        '@type': 'Answer',
+        text: 'Frontend, Backend, System Design, Docker, Kubernetes, CI/CD, Databases, and Behavioral interviews — with hundreds of curated questions.',
+      },
+    },
+    {
+      '@type': 'Question',
+      name: 'How does AI feedback work?',
+      acceptedAnswer: {
+        '@type': 'Answer',
+        text: 'You record your answer in the browser. We transcribe it and a Google Vertex AI agent grades it 0–100, lists specific strengths, identifies gaps, and suggests improvements.',
+      },
+    },
+  ],
+}
 
 const FEATURES = [
   {
@@ -74,6 +114,14 @@ export function Landing() {
   const { status, user } = useAuth()
   const authed = status === 'authenticated'
 
+  useSEO({
+    title: '10xInterview — AI Mock Interviews & Instant Feedback',
+    description:
+      'Practice real interview questions out loud, record your answers, and get honest AI feedback scored 0–100. Curated Frontend, Backend, System Design, Docker, Kubernetes and behavioral questions. Free to try.',
+    path: '/',
+    jsonLd: LANDING_JSONLD,
+  })
+
   return (
     <div className="relative isolate">
       {/* Hero */}
@@ -83,44 +131,44 @@ export function Landing() {
           aria-hidden
           className="absolute left-1/2 top-[-10rem] -z-10 h-[40rem] w-[60rem] -translate-x-1/2 rounded-full bg-gradient-to-br from-brand-500/30 via-fuchsia-500/15 to-transparent blur-3xl"
         />
-        <div className="mx-auto max-w-6xl px-4 pb-24 pt-20 text-center sm:px-6 sm:pt-28 lg:px-8">
+        <div className="mx-auto max-w-6xl px-4 pb-16 pt-14 text-center sm:px-6 sm:pb-24 sm:pt-28 lg:px-8">
           <Badge variant="brand" className="mb-6 gap-1.5 px-3 py-1">
             <Sparkles className="size-3" />
             Powered by Google Vertex AI
           </Badge>
-          <h1 className="mx-auto max-w-4xl text-balance text-4xl font-bold tracking-tight sm:text-6xl">
+          <h1 className="mx-auto max-w-4xl text-balance text-3xl font-bold tracking-tight sm:text-5xl md:text-6xl">
             Land your next role.{' '}
             <span className="bg-gradient-to-r from-brand-300 via-brand-400 to-fuchsia-400 bg-clip-text text-transparent">
               One mock interview at a time.
             </span>
           </h1>
-          <p className="mx-auto mt-6 max-w-2xl text-pretty text-base text-muted-foreground sm:text-lg">
+          <p className="mx-auto mt-5 max-w-2xl text-pretty text-sm text-muted-foreground sm:mt-6 sm:text-lg">
             Practice real interview questions, record your answers out loud, and get honest, specific feedback
             from an AI agent that knows what good looks like.
           </p>
 
-          <div className="mt-10 flex flex-col items-center justify-center gap-3 sm:flex-row">
+          <div className="mt-8 flex flex-col items-stretch justify-center gap-3 sm:mt-10 sm:flex-row sm:items-center">
             {authed ? (
               <>
-                <Button asChild size="xl" variant="brand">
+                <Button asChild size="xl" variant="brand" className="w-full sm:w-auto">
                   <Link to="/dashboard">
                     Continue, {user?.name?.split(' ')[0] || 'welcome back'}
                     <ArrowRight className="size-4" />
                   </Link>
                 </Button>
-                <Button asChild size="xl" variant="outline">
+                <Button asChild size="xl" variant="outline" className="w-full sm:w-auto">
                   <Link to="/interview">Start a mock interview</Link>
                 </Button>
               </>
             ) : (
               <>
-                <Button asChild size="xl" variant="brand">
+                <Button asChild size="xl" variant="brand" className="w-full sm:w-auto">
                   <a href={googleLoginURL('/dashboard')}>
                     Sign in with Google
                     <ArrowRight className="size-4" />
                   </a>
                 </Button>
-                <Button asChild size="xl" variant="outline">
+                <Button asChild size="xl" variant="outline" className="w-full sm:w-auto">
                   <a href="#how-it-works">See how it works</a>
                 </Button>
               </>
@@ -142,7 +190,7 @@ export function Landing() {
         </div>
 
         {/* Floating preview card */}
-        <div className="mx-auto -mt-6 max-w-4xl px-4 pb-24 sm:px-6 lg:px-8">
+        <div className="mx-auto -mt-6 max-w-4xl px-4 pb-16 sm:px-6 sm:pb-24 lg:px-8">
           <div className="relative">
             <div
               aria-hidden
@@ -151,28 +199,28 @@ export function Landing() {
             <Card className="relative overflow-hidden border-border/70 bg-card/70 shadow-2xl shadow-brand-900/20">
               <div className="grid gap-0 md:grid-cols-[1.05fr_1fr]">
                 {/* Question side */}
-                <div className="border-b border-border/60 p-6 md:border-b-0 md:border-r">
-                  <div className="mb-3 flex items-center gap-2">
+                <div className="border-b border-border/60 p-4 sm:p-6 md:border-b-0 md:border-r">
+                  <div className="mb-3 flex flex-wrap items-center gap-2">
                     <Badge variant="brand">Backend</Badge>
                     <Badge variant="outline" className="text-muted-foreground">Medium</Badge>
                     <Badge variant="outline" className="text-muted-foreground">Docker</Badge>
                   </div>
-                  <h3 className="text-lg font-semibold leading-snug">
+                  <h3 className="text-base font-semibold leading-snug sm:text-lg">
                     Explain the difference between a Docker image and a container, and when you would use multi-stage builds.
                   </h3>
-                  <div className="mt-6 flex items-center gap-3">
+                  <div className="mt-5 flex items-center gap-3 sm:mt-6">
                     <button
                       type="button"
-                      className="grid size-12 place-items-center rounded-full bg-gradient-to-br from-brand-400 to-brand-700 text-white shadow-lg shadow-brand-700/30 transition hover:scale-105"
+                      className="grid size-11 shrink-0 place-items-center rounded-full bg-gradient-to-br from-brand-400 to-brand-700 text-white shadow-lg shadow-brand-700/30 transition hover:scale-105 sm:size-12"
                       aria-label="Record"
                     >
                       <Mic className="size-5" />
                     </button>
-                    <div className="flex-1">
+                    <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 text-xs text-muted-foreground">
                         <Timer className="size-3.5" /> 00:42
                       </div>
-                      <div className="mt-2 flex h-8 items-end gap-1">
+                      <div className="mt-2 flex h-8 items-end gap-1 overflow-hidden">
                         {[8, 14, 22, 16, 28, 20, 32, 18, 24, 30, 12, 22, 18, 28, 14, 20].map((h, i) => (
                           <span
                             key={i}
@@ -186,7 +234,7 @@ export function Landing() {
                 </div>
 
                 {/* Feedback side */}
-                <div className="bg-gradient-to-br from-card/60 to-card p-6">
+                <div className="bg-gradient-to-br from-card/60 to-card p-4 sm:p-6">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2 text-sm font-medium">
                       <Bot className="size-4 text-brand-300" /> AI review
@@ -224,17 +272,17 @@ export function Landing() {
       </section>
 
       {/* Feature grid */}
-      <section className="mx-auto max-w-7xl px-4 py-20 sm:px-6 lg:px-8">
+      <section className="mx-auto max-w-7xl px-4 py-14 sm:px-6 sm:py-20 lg:px-8">
         <div className="mx-auto max-w-2xl text-center">
-          <h2 className="text-balance text-3xl font-bold tracking-tight sm:text-4xl">
+          <h2 className="text-balance text-2xl font-bold tracking-tight sm:text-4xl">
             Everything you need to prep, in one place.
           </h2>
-          <p className="mt-4 text-muted-foreground">
+          <p className="mt-3 text-sm text-muted-foreground sm:mt-4 sm:text-base">
             Stop reading answers. Start practicing them out loud and getting feedback that actually helps.
           </p>
         </div>
 
-        <div className="mt-14 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+        <div className="mt-10 grid gap-4 sm:mt-14 md:grid-cols-2 lg:grid-cols-3">
           {FEATURES.map(({ icon: Icon, title, body }) => (
             <Card
               key={title}
@@ -264,15 +312,15 @@ export function Landing() {
           aria-hidden
           className="absolute inset-0 -z-10 bg-gradient-to-b from-transparent via-brand-950/40 to-transparent"
         />
-        <div className="mx-auto max-w-6xl px-4 py-20 sm:px-6 lg:px-8">
+        <div className="mx-auto max-w-6xl px-4 py-14 sm:px-6 sm:py-20 lg:px-8">
           <div className="mx-auto max-w-2xl text-center">
             <Badge variant="brand" className="mb-4">How it works</Badge>
-            <h2 className="text-balance text-3xl font-bold tracking-tight sm:text-4xl">
+            <h2 className="text-balance text-2xl font-bold tracking-tight sm:text-4xl">
               From cold start to confident answer in four steps.
             </h2>
           </div>
 
-          <div className="mt-14 grid gap-6 md:grid-cols-2 lg:grid-cols-4">
+          <div className="mt-10 grid gap-4 sm:mt-14 sm:gap-6 md:grid-cols-2 lg:grid-cols-4">
             {HOW_IT_WORKS.map((s, i) => (
               <div key={s.step} className="relative">
                 <div className="rounded-xl border border-border/60 bg-card/50 p-5">
@@ -318,27 +366,27 @@ export function Landing() {
       </section>
 
       {/* CTA */}
-      <section className="mx-auto max-w-5xl px-4 py-24 sm:px-6 lg:px-8">
-        <div className="relative overflow-hidden rounded-2xl border border-border/60 bg-gradient-to-br from-brand-950/80 via-card to-card p-10 text-center shadow-xl">
+      <section className="mx-auto max-w-5xl px-4 py-16 sm:px-6 sm:py-24 lg:px-8">
+        <div className="relative overflow-hidden rounded-2xl border border-border/60 bg-gradient-to-br from-brand-950/80 via-card to-card p-6 text-center shadow-xl sm:p-10">
           <div
             aria-hidden
             className="absolute left-1/2 top-0 -z-10 h-40 w-[40rem] -translate-x-1/2 rounded-full bg-brand-500/30 blur-3xl"
           />
-          <h2 className="text-balance text-3xl font-bold tracking-tight sm:text-4xl">
+          <h2 className="text-balance text-2xl font-bold tracking-tight sm:text-4xl">
             Ready to ace your next interview?
           </h2>
-          <p className="mx-auto mt-3 max-w-xl text-muted-foreground">
+          <p className="mx-auto mt-3 max-w-xl text-sm text-muted-foreground sm:text-base">
             Sign in with Google and start your first mock interview in under a minute.
           </p>
-          <div className="mt-8">
+          <div className="mt-6 sm:mt-8">
             {authed ? (
-              <Button asChild size="xl" variant="brand">
+              <Button asChild size="xl" variant="brand" className="w-full sm:w-auto">
                 <Link to="/interview">
                   Start a mock interview <ArrowRight className="size-4" />
                 </Link>
               </Button>
             ) : (
-              <Button asChild size="xl" variant="brand">
+              <Button asChild size="xl" variant="brand" className="w-full sm:w-auto">
                 <a href={googleLoginURL('/dashboard')}>
                   Get started — it’s free <ArrowRight className="size-4" />
                 </a>
@@ -355,10 +403,11 @@ export function Landing() {
             <span className="grid size-5 place-items-center rounded bg-gradient-to-br from-brand-400 to-brand-700 text-white">
               <Sparkles className="size-3" />
             </span>
-            <span>© {new Date().getFullYear()} InterviewPrep</span>
+            <span>© {new Date().getFullYear()} 10xInterview</span>
           </div>
           <div className="flex items-center gap-4">
             <a href="#how-it-works" className="hover:text-foreground">How it works</a>
+            <Link to="/contact" className="hover:text-foreground">Contact</Link>
             <Link to="/login" className="hover:text-foreground">Sign in</Link>
           </div>
         </div>

@@ -63,26 +63,30 @@ export function Interview() {
   }
 
   return (
-    <section className="space-y-8">
+    <section className="space-y-6 sm:space-y-8">
       <header className="space-y-2">
-        <h1 className="text-3xl font-bold tracking-tight">Mock Interview</h1>
-        <p className="text-muted-foreground">
+        <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Mock Interview</h1>
+        <p className="text-sm text-muted-foreground sm:text-base">
           Pick a mode and how many questions you want, then start the recorded session.
         </p>
       </header>
 
       <Tabs value={mode} onValueChange={(v) => setMode(v as Mode)}>
-        <TabsList className="h-10">
-          <TabsTrigger value="topic">
-            <Layers className="size-4" /> Topic-based
-          </TabsTrigger>
-          <TabsTrigger value="adaptive">
-            <Sparkles className="size-4" /> Adaptive (uses your profile)
-          </TabsTrigger>
-          <TabsTrigger value="live">
-            <MessagesSquare className="size-4" /> Live Interview
-          </TabsTrigger>
-        </TabsList>
+        <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:overflow-visible sm:px-0">
+          <TabsList className="h-auto w-max min-w-full justify-start sm:w-auto sm:min-w-0">
+            <TabsTrigger value="topic" className="whitespace-nowrap">
+              <Layers className="size-4" /> Topic-based
+            </TabsTrigger>
+            <TabsTrigger value="adaptive" className="whitespace-nowrap">
+              <Sparkles className="size-4" />
+              <span className="sm:hidden">Adaptive</span>
+              <span className="hidden sm:inline">Adaptive (uses your profile)</span>
+            </TabsTrigger>
+            <TabsTrigger value="live" className="whitespace-nowrap">
+              <MessagesSquare className="size-4" /> Live Interview
+            </TabsTrigger>
+          </TabsList>
+        </div>
 
         <TabsContent value="topic" className="space-y-6">
           <Card>
@@ -163,12 +167,13 @@ export function Interview() {
         </p>
       )}
 
-      <div className="flex justify-end gap-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
         <Button
           size="xl"
           variant="brand"
           onClick={onStart}
           disabled={start.isPending || (mode === 'adaptive' && !onboarded)}
+          className="w-full sm:w-auto"
         >
           {start.isPending ? (
             <>

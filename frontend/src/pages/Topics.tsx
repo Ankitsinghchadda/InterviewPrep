@@ -2,23 +2,30 @@ import { Link } from 'react-router-dom'
 import { Layers, Briefcase, Loader2 } from 'lucide-react'
 
 import { useCategories } from '@/hooks/queries'
+import { useAuth } from '@/auth/AuthContext'
+import { NewSkillDialog } from '@/components/NewSkillDialog'
 import type { Category } from '@/types'
 import { Card, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
 export function Topics() {
   const { data, isLoading, error } = useCategories()
+  const { user } = useAuth()
+  const isAdmin = Boolean(user?.isAdmin)
 
   const roles = (data ?? []).filter((c) => c.kind === 'role')
   const topics = (data ?? []).filter((c) => c.kind === 'topic')
 
   return (
     <section className="space-y-6">
-      <header>
-        <h1 className="text-3xl font-bold tracking-tight">Topics</h1>
-        <p className="mt-2 text-muted-foreground">
-          Pick a role for a curated mix, or drill into a specific technology.
-        </p>
+      <header className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Topics</h1>
+          <p className="mt-2 text-muted-foreground">
+            Pick a role for a curated mix, or drill into a specific technology.
+          </p>
+        </div>
+        {isAdmin && <NewSkillDialog />}
       </header>
 
       {error ? (

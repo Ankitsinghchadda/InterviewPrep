@@ -4,9 +4,15 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 
 	"github.com/Ankitsinghchadda/InterviewPrep/internal/models"
+	"github.com/lib/pq"
 )
+
+// ErrDuplicate is returned when a unique constraint is violated (e.g., the
+// slug is already taken). Handlers translate this into a 409 Conflict.
+var ErrDuplicate = errors.New("duplicate")
 
 type CategoryRepo struct {
 	DB *sql.DB
@@ -54,6 +60,33 @@ func (r *CategoryRepo) GetBySlug(ctx context.Context, slug string) (*models.Cate
 		return nil, ErrNotFound
 	}
 	if err != nil {
+		return nil, err
+	}
+	return &c, nil
+}
+
+// Create inserts a new category. Returns ErrDuplicate when slug collides.
+// Caller is responsible for validating/normalising the slug.
+func (r *CategoryRepo) Create(ctx context.Context, in models.Category) (*models.Category, error) {
+	const q = `
+		INSERT INTO categories (slug, name, kind, description, icon, sort_order)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		RETURNING id, slug, name, kind, description, icon, sort_order, created_at
+	`
+	var c models.Category
+	err := r.DB.QueryRowContext(ctx, q,
+		strings.ToLower(strings.TrimSpace(in.Slug)),
+		strings.TrimSpace(in.Name),
+		in.Kind,
+		in.Description,
+		in.Icon,
+		in.SortOrder,
+	).Scan(&c.ID, &c.Slug, &c.Name, &c.Kind, &c.Description, &c.Icon, &c.SortOrder, &c.CreatedAt)
+	if err != nil {
+		var pgErr *pq.Error
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return nil, ErrDuplicate
+		}
 		return nil, err
 	}
 	return &c, nil

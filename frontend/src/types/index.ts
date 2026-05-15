@@ -41,12 +41,24 @@ export interface Question {
   answer: string
   difficulty: Difficulty
   answerAudioUrl?: string
+  explanationSummary?: string
+  explanationMarkdown?: string
   ownerId?: string
   isPublic: boolean
   source: 'curated' | 'user' | 'adaptive' | 'live'
   intent?: string
   categories: string[] // slugs
   createdAt: string
+  // Only populated when the row came from `/questions?q=…` (hybrid search).
+  score?: number
+  snippet?: string // HTML with <mark> tags around matched terms
+}
+
+// SimilarQuestion is a Question augmented with its cosine similarity (0..1) to
+// the query the user is typing. Returned by the dedup endpoints; the UI shows
+// the score as a "92% match" badge.
+export interface SimilarQuestion extends Question {
+  similarity: number
 }
 
 export type SubmissionStatus =
@@ -95,6 +107,96 @@ export interface ApiEnvelope<T> {
   error?: string
 }
 
+// ---- Dashboard stats ------------------------------------------------------
+
+export interface VolumeStats {
+  totalSubmissions: number
+  uniqueQuestions: number
+  interviewsStarted: number
+  interviewsCompleted: number
+  submissionsLast30Days: number
+}
+
+export interface ScoringStats {
+  averageScore: number | null
+  averageLast30: number | null
+  averagePrior30: number | null
+  bestScore: number | null
+  scoredCount: number
+}
+
+export interface StreakStats {
+  current: number
+  longest: number
+  practicedToday: boolean
+}
+
+export interface TrendPoint {
+  day: string // YYYY-MM-DD
+  submissions: number
+  avgScore: number | null
+}
+
+export interface CategoryScore {
+  slug: string
+  name: string
+  submissions: number
+  avgScore: number
+}
+
+export interface CategoryStrengths {
+  strong: CategoryScore[]
+  weak: CategoryScore[]
+}
+
+export interface ThemeCount {
+  theme: string
+  count: number
+}
+
+export interface ThemeStats {
+  strengths: ThemeCount[]
+  improvements: ThemeCount[]
+}
+
+export interface DifficultyBucket {
+  difficulty: Difficulty
+  submissions: number
+  avgScore: number | null
+}
+
+export interface GoalAlignment {
+  targetRole: string
+  onTargetSubmissions: number
+  offTargetSubmissions: number
+  alignmentPercent: number
+}
+
+export interface StatsOverview {
+  volume: VolumeStats
+  scoring: ScoringStats
+  streak: StreakStats
+  trend: TrendPoint[]
+  categories: CategoryStrengths
+  themes: ThemeStats
+  difficultyDistribution: DifficultyBucket[]
+  goalAlignment: GoalAlignment
+  generatedAt: string
+}
+
+// ---- Smart recommendations ------------------------------------------------
+
+export interface RecommendationItem {
+  question: Question
+  reason: string
+}
+
+export interface SmartRecommendations {
+  weakAreas: RecommendationItem[]
+  levelUp: RecommendationItem[]
+  goalGaps: RecommendationItem[]
+}
+
 export interface User {
   id: string
   email: string
@@ -104,4 +206,7 @@ export interface User {
   createdAt: string
   updatedAt: string
   lastLoginAt?: string
+  // Derived from the backend's ADMIN_EMAILS allow-list. UI hint only — every
+  // admin route is independently enforced server-side.
+  isAdmin?: boolean
 }

@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/joho/godotenv"
@@ -47,6 +48,16 @@ type Config struct {
 
 	// Resume upload
 	MaxResumeBytes int64
+
+	// Admin allow-list. Emails (case-insensitive) that may create categories
+	// and other admin-only resources. Set via ADMIN_EMAILS=a@x.com,b@y.com.
+	AdminEmails map[string]struct{}
+
+	// Semantic dedup thresholds (cosine similarity in [0,1]). Two thresholds:
+	// WarnThreshold surfaces matches live as the user types; BlockThreshold
+	// causes Create to return 409 unless the request carries ?force=true.
+	DedupWarnThreshold  float64
+	DedupBlockThreshold float64
 }
 
 func Load() *Config {
@@ -84,6 +95,11 @@ func Load() *Config {
 
 		AudioBucket: getEnv("AUDIO_BUCKET", ""),
 		TTSVoice:    getEnv("TTS_VOICE", "en-US-Neural2-D"),
+
+		DedupWarnThreshold:  getFloat("DEDUP_WARN_THRESHOLD", 0.78),
+		DedupBlockThreshold: getFloat("DEDUP_BLOCK_THRESHOLD", 0.88),
+
+		AdminEmails: parseEmailSet(getEnv("ADMIN_EMAILS", "")),
 	}
 
 	if cfg.Env == "production" {
@@ -142,6 +158,27 @@ func getInt64(key string, fallback int64) int64 {
 		}
 	}
 	return fallback
+}
+
+func getFloat(key string, fallback float64) float64 {
+	if v, ok := os.LookupEnv(key); ok && v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			return f
+		}
+	}
+	return fallback
+}
+
+// parseEmailSet splits a comma-separated env value into a lower-cased set.
+// Used for the ADMIN_EMAILS allow-list so lookups are O(1) and case-insensitive.
+func parseEmailSet(raw string) map[string]struct{} {
+	out := map[string]struct{}{}
+	for _, p := range strings.Split(raw, ",") {
+		if e := strings.ToLower(strings.TrimSpace(p)); e != "" {
+			out[e] = struct{}{}
+		}
+	}
+	return out
 }
 
 func getDuration(key string, fallback time.Duration) time.Duration {

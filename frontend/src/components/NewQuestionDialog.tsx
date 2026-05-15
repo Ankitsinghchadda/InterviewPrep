@@ -2,9 +2,16 @@ import { useState } from 'react'
 import { useForm, type SubmitHandler } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { Loader2, Plus } from 'lucide-react'
+import { AlertTriangle, Loader2, Plus, Sparkles } from 'lucide-react'
+import { Link } from 'react-router-dom'
 
-import { useCategories, useCreateQuestion } from '@/hooks/queries'
+import {
+  useCategories,
+  useCreateQuestion,
+  useGenerateAnswerDraft,
+  useSimilarQuestions,
+} from '@/hooks/queries'
+import { SimilarQuestionConflict } from '@/services/questions'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -20,10 +27,13 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
-import type { Difficulty } from '@/types'
+import type { Difficulty, SimilarQuestion } from '@/types'
 
 const DIFFICULTIES: Difficulty[] = ['easy', 'medium', 'hard']
 
+// The answer field is optional in the form schema — when blank the server
+// auto-generates a reference answer. When the user does fill it in we still
+// enforce the same minimum length as before.
 const schema = z.object({
   title: z
     .string()
@@ -34,8 +44,10 @@ const schema = z.object({
   answer: z
     .string()
     .trim()
-    .min(20, 'A useful reference answer is at least 20 characters.')
-    .max(8000, 'Keep the answer under 8000 characters.'),
+    .max(8000, 'Keep the answer under 8000 characters.')
+    .refine((v) => v === '' || v.length >= 20, {
+      message: 'A useful reference answer is at least 20 characters (or leave blank to auto-generate).',
+    }),
   difficulty: z.enum(['easy', 'medium', 'hard']),
 })
 
@@ -45,9 +57,12 @@ export function NewQuestionDialog() {
   const [open, setOpen] = useState(false)
   const [selectedSlugs, setSelectedSlugs] = useState<Set<string>>(new Set())
   const [submitErr, setSubmitErr] = useState<string | null>(null)
+  // Populated when the server returns a 409 — drives the confirm-or-cancel UI.
+  const [conflict, setConflict] = useState<SimilarQuestion[] | null>(null)
 
   const { data: categories } = useCategories()
   const create = useCreateQuestion()
+  const generateAnswer = useGenerateAnswerDraft()
 
   const {
     register,
@@ -56,11 +71,18 @@ export function NewQuestionDialog() {
     reset,
     watch,
     setValue,
+    getValues,
   } = useForm<FormValues>({
     resolver: zodResolver(schema),
     defaultValues: { title: '', body: '', answer: '', difficulty: 'medium' },
   })
+  const title = watch('title')
+  const body = watch('body')
   const difficulty = watch('difficulty')
+
+  // Live dedup panel. The hook handles debouncing + the < 8 char short-circuit.
+  const similar = useSimilarQuestions({ title, body })
+  const matches = (similar.data ?? []).filter((m) => m.title.trim() !== title.trim())
 
   const toggleSlug = (slug: string) => {
     setSelectedSlugs((prev) => {
@@ -77,22 +99,51 @@ export function NewQuestionDialog() {
       reset()
       setSelectedSlugs(new Set())
       setSubmitErr(null)
+      setConflict(null)
     }
   }
 
-  const onSubmit: SubmitHandler<FormValues> = async (values) => {
+  const submit = async (values: FormValues, force: boolean) => {
     setSubmitErr(null)
+    setConflict(null)
     try {
       await create.mutateAsync({
         title: values.title,
         body: values.body || '',
-        answer: values.answer,
+        answer: values.answer || undefined,
         difficulty: values.difficulty,
         categories: Array.from(selectedSlugs),
+        force,
       })
       onClose(false)
     } catch (err) {
-      setSubmitErr((err as Error)?.message || 'Could not save the question.')
+      if (err instanceof SimilarQuestionConflict) {
+        setConflict(err.matches)
+      } else {
+        setSubmitErr((err as Error)?.message || 'Could not save the question.')
+      }
+    }
+  }
+
+  const onSubmit: SubmitHandler<FormValues> = (values) => submit(values, false)
+
+  const onGenerate = async () => {
+    setSubmitErr(null)
+    const v = getValues()
+    if (!v.title || v.title.trim().length < 8) {
+      setSubmitErr('Write the question title first (at least 8 characters), then we can draft an answer.')
+      return
+    }
+    try {
+      const draft = await generateAnswer.mutateAsync({
+        title: v.title,
+        body: v.body || '',
+        difficulty: v.difficulty,
+        categories: Array.from(selectedSlugs),
+      })
+      setValue('answer', draft, { shouldDirty: true, shouldValidate: true })
+    } catch (err) {
+      setSubmitErr((err as Error)?.message || 'Could not draft an answer.')
     }
   }
 
@@ -110,7 +161,7 @@ export function NewQuestionDialog() {
         <DialogHeader>
           <DialogTitle>Add a personal question</DialogTitle>
           <DialogDescription>
-            Saved to your library. Use it for solo practice or mix it into a mock interview.
+            Saved to your library. Leave the answer blank and we’ll draft one for you.
           </DialogDescription>
         </DialogHeader>
 
@@ -129,6 +180,13 @@ export function NewQuestionDialog() {
             />
           </Field>
 
+          {/* Live "looks similar to" panel — shows up as soon as the user has
+              typed at least 8 chars and at least one match clears the warn
+              threshold on the server (default 0.78 cosine sim). */}
+          {matches.length > 0 && (
+            <SimilarPanel matches={matches} onPick={() => onClose(false)} />
+          )}
+
           <Field
             id="body"
             label="Extra context (optional)"
@@ -144,20 +202,42 @@ export function NewQuestionDialog() {
             />
           </Field>
 
-          <Field
-            id="answer"
-            label="Reference answer"
-            error={errors.answer?.message}
-            hint="What a strong answer covers. The AI reviewer compares against this."
-          >
+          <div className="grid gap-1.5">
+            <div className="flex items-center justify-between">
+              <Label htmlFor="answer">Reference answer</Label>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={onGenerate}
+                disabled={generateAnswer.isPending}
+              >
+                {generateAnswer.isPending ? (
+                  <>
+                    <Loader2 className="size-3.5 animate-spin" /> Drafting…
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="size-3.5" /> Generate draft
+                  </>
+                )}
+              </Button>
+            </div>
             <Textarea
               id="answer"
               rows={6}
-              placeholder="A process has its own memory space, scheduled by the OS…"
+              placeholder="Leave blank and we’ll draft one for you, or write what a strong answer covers."
               aria-invalid={Boolean(errors.answer)}
               {...register('answer')}
             />
-          </Field>
+            {errors.answer?.message ? (
+              <p className="text-xs text-red-300">{errors.answer.message}</p>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                The AI reviewer compares candidate answers against this.
+              </p>
+            )}
+          </div>
 
           <div className="grid gap-1.5">
             <Label>Difficulty</Label>
@@ -198,6 +278,15 @@ export function NewQuestionDialog() {
             />
           </div>
 
+          {conflict && (
+            <ConflictPanel
+              matches={conflict}
+              onPick={() => onClose(false)}
+              onForce={() => submit(getValues(), true)}
+              busy={create.isPending}
+            />
+          )}
+
           {submitErr && (
             <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-red-300">
               {submitErr}
@@ -225,6 +314,99 @@ export function NewQuestionDialog() {
         </form>
       </DialogContent>
     </Dialog>
+  )
+}
+
+// SimilarPanel renders the live (above-warn-threshold) matches under the title
+// field. Clicking "Use this" closes the dialog and navigates to that question.
+function SimilarPanel({
+  matches,
+  onPick,
+}: {
+  matches: SimilarQuestion[]
+  onPick: () => void
+}) {
+  return (
+    <div className="rounded-md border border-amber-500/40 bg-amber-500/5 px-3 py-2.5">
+      <div className="mb-1.5 flex items-center gap-1.5 text-xs font-medium uppercase tracking-wider text-amber-200">
+        <AlertTriangle className="size-3.5" /> Looks similar to existing question{matches.length > 1 ? 's' : ''}
+      </div>
+      <ul className="space-y-2">
+        {matches.slice(0, 4).map((m) => (
+          <li
+            key={m.id}
+            className="flex flex-col gap-1 text-sm sm:flex-row sm:items-center sm:justify-between sm:gap-2"
+          >
+            <span className="min-w-0 truncate text-foreground/90">{m.title}</span>
+            <span className="flex shrink-0 items-center gap-2">
+              <span className="text-xs text-muted-foreground">
+                {Math.round(m.similarity * 100)}% match
+              </span>
+              <Link
+                to={`/questions/${m.id}`}
+                onClick={onPick}
+                className="rounded-full border border-border/60 px-2 py-0.5 text-xs text-foreground/90 hover:border-amber-400/60 hover:text-amber-100"
+              >
+                Use this
+              </Link>
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+// ConflictPanel appears after a 409 response. It mirrors SimilarPanel but adds
+// an explicit "Create anyway" path that re-submits with `force=true`.
+function ConflictPanel({
+  matches,
+  onPick,
+  onForce,
+  busy,
+}: {
+  matches: SimilarQuestion[]
+  onPick: () => void
+  onForce: () => void
+  busy: boolean
+}) {
+  return (
+    <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2.5">
+      <div className="mb-1.5 flex items-center gap-1.5 text-xs font-medium uppercase tracking-wider text-red-200">
+        <AlertTriangle className="size-3.5" /> A near-duplicate already exists
+      </div>
+      <ul className="mb-2 space-y-2">
+        {matches.slice(0, 3).map((m) => (
+          <li
+            key={m.id}
+            className="flex flex-col gap-1 text-sm sm:flex-row sm:items-center sm:justify-between sm:gap-2"
+          >
+            <span className="min-w-0 truncate text-foreground/90">{m.title}</span>
+            <span className="flex shrink-0 items-center gap-2">
+              <span className="text-xs text-muted-foreground">
+                {Math.round(m.similarity * 100)}% match
+              </span>
+              <Link
+                to={`/questions/${m.id}`}
+                onClick={onPick}
+                className="rounded-full border border-border/60 px-2 py-0.5 text-xs text-foreground/90 hover:border-brand-400/60 hover:text-brand-100"
+              >
+                Use existing
+              </Link>
+            </span>
+          </li>
+        ))}
+      </ul>
+      <Button type="button" variant="ghost" size="sm" onClick={onForce} disabled={busy}>
+        {busy ? (
+          <>
+            <Loader2 className="size-3.5 animate-spin" /> Saving…
+          </>
+        ) : (
+          'Create anyway'
+        )}
+      </Button>
+    </div>
   )
 }
 

@@ -1,8 +1,10 @@
 import { createBrowserRouter } from 'react-router-dom'
 import { Layout } from '@/components/layout/Layout'
 import { Landing } from '@/pages/Landing'
+import { Contact } from '@/pages/Contact'
 import { Home } from '@/pages/Home'
 import { Topics } from '@/pages/Topics'
+import { TopicDetail } from '@/pages/TopicDetail'
 import { Questions } from '@/pages/Questions'
 import { QuestionDetail } from '@/pages/QuestionDetail'
 import { Interview } from '@/pages/Interview'
@@ -17,7 +19,13 @@ export const router = createBrowserRouter([
     element: <Layout />,
     children: [
       { index: true, element: <Landing /> },
+      { path: 'contact', element: <Contact /> },
       { path: 'login', element: <Login /> },
+      // Public SEO surfaces — viewable without login. Pages themselves gate
+      // any auth-requiring features (e.g. "practice" / "see answer") behind
+      // login. Sitemap lists every /topics/:slug and /questions/:slug.
+      { path: 'topics/:slug', element: <TopicDetail /> },
+      { path: 'questions/:id', element: <QuestionDetail /> },
       {
         element: <ProtectedRoute />,
         children: [
@@ -25,7 +33,6 @@ export const router = createBrowserRouter([
           { path: 'onboarding', element: <Onboarding /> },
           { path: 'topics', element: <Topics /> },
           { path: 'questions', element: <Questions /> },
-          { path: 'questions/:id', element: <QuestionDetail /> },
           { path: 'interview', element: <Interview /> },
           { path: 'interview/:id', element: <InterviewRunner /> },
         ],

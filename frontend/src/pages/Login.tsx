@@ -4,6 +4,7 @@ import { Sparkles } from 'lucide-react'
 
 import { useAuth } from '@/auth/AuthContext'
 import { googleLoginURL } from '@/services/auth'
+import { useSEO } from '@/hooks/useSEO'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 
 const ERROR_MESSAGES: Record<string, string> = {
@@ -23,6 +24,13 @@ export function Login() {
   const errorCode = params.get('error')
   const errorMsg = errorCode ? ERROR_MESSAGES[errorCode] ?? 'Sign-in failed. Please try again.' : null
 
+  useSEO({
+    title: 'Sign in to 10xInterview',
+    description: 'Sign in with Google to access AI mock interviews, curated questions, and your personal practice library on 10xInterview.',
+    path: '/login',
+    noindex: true,
+  })
+
   useEffect(() => {
     if (status === 'authenticated') {
       navigate(redirect, { replace: true })
@@ -36,7 +44,7 @@ export function Login() {
           <span className="mb-3 grid size-10 place-items-center rounded-lg bg-gradient-to-br from-brand-400 to-brand-700 text-white shadow-md shadow-brand-700/30">
             <Sparkles className="size-5" />
           </span>
-          <CardTitle className="text-2xl">Sign in to InterviewPrep</CardTitle>
+          <CardTitle className="text-2xl">Sign in to 10xInterview</CardTitle>
           <CardDescription>Use your Google account to continue.</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col items-center gap-4">

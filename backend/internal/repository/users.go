@@ -10,7 +10,10 @@ import (
 	"github.com/google/uuid"
 )
 
-var ErrNotFound = errors.New("not found")
+var (
+	ErrNotFound = errors.New("not found")
+	ErrInUse    = errors.New("row is referenced by another table")
+)
 
 type UserRepo struct {
 	DB *sql.DB

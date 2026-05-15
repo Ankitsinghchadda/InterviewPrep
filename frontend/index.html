@@ -2,13 +2,158 @@
 <html lang="en" class="dark">
   <head>
     <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+
+    <!-- Primary SEO -->
+    <title>10xInterview — AI Mock Interviews, Practice Questions & Instant Feedback</title>
+    <meta
+      name="description"
+      content="Practice real interview questions out loud, record your answers, and get instant AI feedback scored 0-100. Curated Frontend, Backend, System Design, Docker, Kubernetes and behavioral questions. Free to try."
+    />
+    <meta
+      name="keywords"
+      content="mock interview, AI interview practice, technical interview questions, system design interview, frontend interview, backend interview, behavioral interview, interview prep, coding interview, FAANG interview preparation, 10xinterview"
+    />
+    <meta name="author" content="10xInterview" />
+    <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
+    <meta name="googlebot" content="index, follow" />
+    <meta name="rating" content="general" />
+    <meta name="theme-color" content="#0a0a0f" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+    <meta name="color-scheme" content="dark light" />
+    <meta name="application-name" content="10xInterview" />
+    <meta name="apple-mobile-web-app-title" content="10xInterview" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="format-detection" content="telephone=no" />
+    <meta name="referrer" content="strict-origin-when-cross-origin" />
+
+    <!-- Canonical (overridden per-route by the SEO hook) -->
+    <link rel="canonical" href="https://10xinterview.com/" />
+
+    <!-- Open Graph / Facebook -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="10xInterview" />
+    <meta property="og:url" content="https://10xinterview.com/" />
+    <meta property="og:title" content="10xInterview — AI Mock Interviews & Instant Feedback" />
+    <meta
+      property="og:description"
+      content="Practice real interview questions out loud, record your answers, and get honest AI feedback scored 0-100. Free to try."
+    />
+    <meta property="og:image" content="https://10xinterview.com/og-image.png" />
+    <meta property="og:image:secure_url" content="https://10xinterview.com/og-image.png" />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="10xInterview — AI-powered mock interview practice" />
+    <meta property="og:locale" content="en_US" />
+
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:site" content="@10xinterview" />
+    <meta name="twitter:creator" content="@10xinterview" />
+    <meta name="twitter:url" content="https://10xinterview.com/" />
+    <meta name="twitter:title" content="10xInterview — AI Mock Interviews & Instant Feedback" />
+    <meta
+      name="twitter:description"
+      content="Practice real interview questions out loud, record your answers, and get honest AI feedback scored 0-100. Free to try."
+    />
+    <meta name="twitter:image" content="https://10xinterview.com/og-image.png" />
+    <meta name="twitter:image:alt" content="10xInterview — AI-powered mock interview practice" />
+
+    <!-- Icons & manifest -->
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="Interview Prep — practice technical interview questions, record answers, and get instant AI feedback." />
-    <title>Interview Prep — Practice, Record, Improve</title>
+    <link rel="alternate icon" href="/favicon.ico" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    <link rel="mask-icon" href="/favicon.svg" color="#863bff" />
+    <link rel="manifest" href="/site.webmanifest" />
+
+    <!-- Resource hints -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin />
+    <link rel="dns-prefetch" href="https://fonts.googleapis.com" />
+
+    <!-- Sitemap (some crawlers respect this) -->
+    <link rel="sitemap" type="application/xml" href="/sitemap.xml" />
+
+    <!-- JSON-LD: Organization -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "Organization",
+        "name": "10xInterview",
+        "url": "https://10xinterview.com",
+        "logo": "https://10xinterview.com/favicon.svg",
+        "sameAs": [],
+        "contactPoint": {
+          "@type": "ContactPoint",
+          "email": "contact@10xinterview.com",
+          "contactType": "customer support",
+          "availableLanguage": ["English"]
+        }
+      }
+    </script>
+
+    <!-- JSON-LD: WebSite with SearchAction -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebSite",
+        "name": "10xInterview",
+        "url": "https://10xinterview.com",
+        "potentialAction": {
+          "@type": "SearchAction",
+          "target": {
+            "@type": "EntryPoint",
+            "urlTemplate": "https://10xinterview.com/questions?q={search_term_string}"
+          },
+          "query-input": "required name=search_term_string"
+        }
+      }
+    </script>
+
+    <!-- JSON-LD: SoftwareApplication -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "10xInterview",
+        "applicationCategory": "EducationalApplication",
+        "applicationSubCategory": "Interview Preparation",
+        "operatingSystem": "Web",
+        "url": "https://10xinterview.com",
+        "description": "AI-powered mock interview platform. Practice technical interview questions, record voice answers, and receive instant scored feedback from a Vertex AI agent.",
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "USD",
+          "availability": "https://schema.org/InStock"
+        },
+        "featureList": [
+          "Hundreds of curated technical interview questions",
+          "Voice answer recording with transcription",
+          "AI feedback scored 0 to 100 with specific strengths and gaps",
+          "Timed mock interviews with full result reports",
+          "Personal question library",
+          "Progress tracking over time"
+        ]
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>
+    <noscript>
+      <div style="max-width: 720px; margin: 4rem auto; padding: 2rem; font-family: system-ui, sans-serif; color: #e5e5e5; background: #0a0a0f;">
+        <h1>10xInterview — AI Mock Interviews & Instant Feedback</h1>
+        <p>
+          Practice real interview questions out loud, record your answers, and get honest AI feedback
+          scored 0–100. Curated Frontend, Backend, System Design, Docker, Kubernetes, CI/CD, Databases,
+          and behavioral questions.
+        </p>
+        <p>This app requires JavaScript. Please enable it to continue.</p>
+      </div>
+    </noscript>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

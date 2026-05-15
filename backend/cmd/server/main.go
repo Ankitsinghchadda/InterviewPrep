@@ -17,6 +17,7 @@ import (
 	"github.com/Ankitsinghchadda/InterviewPrep/internal/routes"
 	"github.com/Ankitsinghchadda/InterviewPrep/internal/services/agent"
 	"github.com/Ankitsinghchadda/InterviewPrep/internal/services/audio"
+	"github.com/Ankitsinghchadda/InterviewPrep/internal/services/embeddings"
 	"github.com/Ankitsinghchadda/InterviewPrep/internal/services/stt"
 	"github.com/Ankitsinghchadda/InterviewPrep/internal/services/submissions"
 	"github.com/Ankitsinghchadda/InterviewPrep/internal/services/tts"
@@ -69,7 +70,11 @@ func main() {
 		Designer:        ai.designer,
 		LiveInterviewer: ai.liveInterviewer,
 		Extractor:       ai.extractor,
+		Explainer:       ai.explainer,
+		AnswerGen:       ai.answerGen,
+		QuestionGen:     ai.questionGen,
 		Synth:           ai.synth,
+		Embedder:        ai.embedder,
 	})
 
 	srv := &http.Server{
@@ -105,7 +110,11 @@ type aiBundle struct {
 	designer        agent.InterviewDesigner
 	liveInterviewer agent.LiveInterviewer
 	extractor       agent.ProfileExtractor
+	explainer       agent.Explainer
+	answerGen       agent.AnswerGenerator
+	questionGen     agent.QuestionGenerator
 	synth           tts.Synthesizer
+	embedder        embeddings.Embedder
 }
 
 // buildAIServices wires every AI-backed service. Stubs are used when GCP isn't
@@ -118,7 +127,11 @@ func buildAIServices(cfg *config.Config) aiBundle {
 		designer:        agent.StubInterviewDesigner{},
 		liveInterviewer: agent.StubLiveInterviewer{},
 		extractor:       agent.StubProfileExtractor{},
+		explainer:       agent.StubExplainer{},
+		answerGen:       agent.StubAnswerGenerator{},
+		questionGen:     agent.StubQuestionGenerator{},
 		synth:           tts.Stub{},
+		embedder:        embeddings.Stub{}, // deterministic fallback so dedup UX works without GCP
 	}
 	if !cfg.AgentEnabled {
 		log.Println("AI: using stubs for reviewer/aggregator/designer/live/extractor + STT (set AGENT_ENABLED=true to enable Vertex AI)")
@@ -167,6 +180,26 @@ func buildAIServices(cfg *config.Config) aiBundle {
 		out.extractor = e
 	} else {
 		log.Printf("AI: Vertex extractor init failed: %v (using stub)", err)
+	}
+	if x, err := agent.NewVertexExplainer(ctx, cfg.GCPProject, cfg.GCPLocation, cfg.AgentModel); err == nil {
+		out.explainer = x
+	} else {
+		log.Printf("AI: Vertex explainer init failed: %v (using stub)", err)
+	}
+	if em, err := embeddings.New(ctx, cfg.GCPProject, cfg.GCPLocation, embeddings.DefaultModel); err == nil {
+		out.embedder = em
+	} else {
+		log.Printf("AI: Vertex embeddings init failed: %v (falling back to stub embedder)", err)
+	}
+	if g, err := agent.NewVertexAnswerGenerator(ctx, cfg.GCPProject, cfg.GCPLocation, cfg.AgentModel); err == nil {
+		out.answerGen = g
+	} else {
+		log.Printf("AI: Vertex answer generator init failed: %v (using stub)", err)
+	}
+	if qg, err := agent.NewVertexQuestionGenerator(ctx, cfg.GCPProject, cfg.GCPLocation, cfg.AgentModel); err == nil {
+		out.questionGen = qg
+	} else {
+		log.Printf("AI: Vertex question generator init failed: %v (using stub)", err)
 	}
 
 	log.Printf("AI: Vertex %s/%s, model=%s, STT lang=%s", cfg.GCPProject, cfg.GCPLocation, cfg.AgentModel, cfg.STTLanguage)

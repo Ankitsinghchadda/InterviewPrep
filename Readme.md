@@ -1,4 +1,4 @@
-# Interview Prep Project
+# 10xInterview
 
 Features: 
 
