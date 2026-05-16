@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Ankitsinghchadda/InterviewPrep/internal/auth"
+	"github.com/Ankitsinghchadda/InterviewPrep/internal/billing"
 	"github.com/Ankitsinghchadda/InterviewPrep/internal/models"
 	"github.com/Ankitsinghchadda/InterviewPrep/internal/repository"
 	"github.com/Ankitsinghchadda/InterviewPrep/internal/services/agent"
@@ -24,11 +25,13 @@ import (
 type QuestionHandler struct {
 	Repo              *repository.QuestionRepo
 	Profiles          *repository.ProfileRepo
+	Collections       *repository.CollectionRepo // ?in_collection= filter + GET /{id}/collections
 	Submitter         *submissions.Service
 	Synth             tts.Synthesizer
 	Embedder          embeddings.Embedder     // nil disables semantic search + dedup + auto-embed
 	AnswerGenerator   agent.AnswerGenerator   // nil rejects blank-answer submissions
 	QuestionGenerator agent.QuestionGenerator // nil disables POST /questions/generate
+	Billing           *billing.Service
 	MaxAudioBytes     int64
 	WarnThreshold     float64 // cosine sim ≥ this surfaces a row as "similar" (default 0.78)
 	BlockThreshold    float64 // cosine sim ≥ this triggers a 409 on save unless ?force=true (default 0.88)
@@ -39,6 +42,7 @@ type QuestionHandler struct {
 //   categories=docker,backend  (comma-separated slugs, OR-match)
 //   difficulty=easy|medium|hard
 //   mine=true                  (only the caller's questions)
+//   in_collection=<uuid>       only questions in the given collection (must be owned by caller)
 //   limit=50
 func (h *QuestionHandler) List(w http.ResponseWriter, r *http.Request) {
 	userID, _ := auth.UserID(r.Context())
@@ -62,6 +66,22 @@ func (h *QuestionHandler) List(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if cid := strings.TrimSpace(r.URL.Query().Get("in_collection")); cid != "" {
+		if userID == "" || h.Collections == nil {
+			response.Err(w, http.StatusUnauthorized, "unauthorized")
+			return
+		}
+		if _, err := h.Collections.Get(r.Context(), cid, userID); err != nil {
+			if errors.Is(err, repository.ErrNotFound) {
+				response.Err(w, http.StatusNotFound, "collection not found")
+				return
+			}
+			response.Err(w, http.StatusInternalServerError, "failed to load collection")
+			return
+		}
+		f.CollectionID = cid
+	}
+
 	if q := strings.TrimSpace(r.URL.Query().Get("q")); q != "" {
 		h.searchQuestions(w, r, q, f)
 		return
@@ -73,6 +93,29 @@ func (h *QuestionHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	response.OK(w, http.StatusOK, qs)
+}
+
+// CollectionsForQuestion returns the ids of the caller's collections that
+// already include this question. Used by the bookmark / "Save to..." menu to
+// render which collections are toggled on without scanning the full membership
+// in the client.
+func (h *QuestionHandler) CollectionsForQuestion(w http.ResponseWriter, r *http.Request) {
+	userID, ok := auth.UserID(r.Context())
+	if !ok {
+		response.Err(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	if h.Collections == nil {
+		response.OK(w, http.StatusOK, []string{})
+		return
+	}
+	id := chi.URLParam(r, "id")
+	ids, err := h.Collections.CollectionIDsForQuestion(r.Context(), userID, id)
+	if err != nil {
+		response.Err(w, http.StatusInternalServerError, "failed to load collection membership")
+		return
+	}
+	response.OK(w, http.StatusOK, ids)
 }
 
 // searchQuestions powers the ?q=… branch of List. Embeds the query with the
@@ -184,6 +227,13 @@ func (h *QuestionHandler) Create(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Adding a question (with or without auto-answer) burns one
+	// question_add slot. AnswerGen on this path rolls into the same
+	// budget — we don't double-charge.
+	if !checkQuota(w, r, h.Billing, billing.KindQuestionAdd) {
+		return
+	}
+
 	// Auto-generate the reference answer when the user leaves it blank. The
 	// frontend's Zod schema makes the field optional; the server decides
 	// whether to draft one or reject.
@@ -206,6 +256,7 @@ func (h *QuestionHandler) Create(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		body.Answer = strings.TrimSpace(gen)
+		// AnswerGen rolls into the question-add budget — same call surface.
 	}
 
 	q, err := h.Repo.Create(r.Context(), repository.CreateQuestionInput{
@@ -222,6 +273,7 @@ func (h *QuestionHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	synthesizeAndStore(h.Synth, h.Repo, q)
 	embedAndStore(h.Embedder, h.Repo, q)
+	safeRecord(r.Context(), h.Billing, billing.KindQuestionAdd, nil)
 	response.OK(w, http.StatusCreated, q)
 }
 
@@ -297,6 +349,9 @@ func (h *QuestionHandler) GenerateAnswer(w http.ResponseWriter, r *http.Request)
 		response.Err(w, http.StatusServiceUnavailable, "answer generator is not configured")
 		return
 	}
+	if !checkQuota(w, r, h.Billing, billing.KindAnswerGen) {
+		return
+	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
@@ -311,6 +366,7 @@ func (h *QuestionHandler) GenerateAnswer(w http.ResponseWriter, r *http.Request)
 		response.Err(w, http.StatusBadGateway, "failed to generate reference answer")
 		return
 	}
+	safeRecord(r.Context(), h.Billing, billing.KindAnswerGen, nil)
 	response.OK(w, http.StatusOK, map[string]string{"answer": strings.TrimSpace(gen)})
 }
 
@@ -369,6 +425,9 @@ func (h *QuestionHandler) Generate(w http.ResponseWriter, r *http.Request) {
 		response.Err(w, http.StatusServiceUnavailable, "question generator is not configured")
 		return
 	}
+	if !checkQuota(w, r, h.Billing, billing.KindQuestionGen) {
+		return
+	}
 
 	created, err := seedAIQuestionsForCategories(
 		r.Context(),
@@ -385,6 +444,7 @@ func (h *QuestionHandler) Generate(w http.ResponseWriter, r *http.Request) {
 		response.Err(w, http.StatusBadGateway, "failed to generate questions")
 		return
 	}
+	safeRecord(r.Context(), h.Billing, billing.KindQuestionGen, map[string]any{"count": len(created)})
 
 	response.OK(w, http.StatusCreated, created)
 }
@@ -561,6 +621,9 @@ func (h *QuestionHandler) SubmitAnswer(w http.ResponseWriter, r *http.Request) {
 		response.Err(w, http.StatusNotFound, "question not found")
 		return
 	}
+	if !checkQuota(w, r, h.Billing, billing.KindRecordingReview) {
+		return
+	}
 
 	file, mimeType, err := readAudioPart(w, r, h.MaxAudioBytes)
 	if err != nil {
@@ -581,5 +644,10 @@ func (h *QuestionHandler) SubmitAnswer(w http.ResponseWriter, r *http.Request) {
 		response.Err(w, http.StatusInternalServerError, "failed to create submission")
 		return
 	}
+	// Record at submit time: cost is committed once the SSE stream kicks
+	// off — we don't want a failed transcription to leave a hole in the
+	// user's weekly budget either, but the alternative (record on stream
+	// completion) leaks free reviews on disconnect.
+	safeRecord(r.Context(), h.Billing, billing.KindRecordingReview, map[string]any{"submission_id": sub.ID})
 	response.OK(w, http.StatusAccepted, sub)
 }

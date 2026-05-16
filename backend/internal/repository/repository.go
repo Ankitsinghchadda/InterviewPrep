@@ -12,6 +12,9 @@ type Repository struct {
 	Submissions *SubmissionRepo
 	Profiles    *ProfileRepo
 	Stats       *StatsRepo
+	Usage       *UsageRepo
+	Collections *CollectionRepo
+	Payments    *PaymentEventRepo
 }
 
 func New(db *sql.DB) *Repository {
@@ -25,5 +28,8 @@ func New(db *sql.DB) *Repository {
 		Submissions: &SubmissionRepo{DB: db},
 		Profiles:    &ProfileRepo{DB: db},
 		Stats:       &StatsRepo{DB: db},
+		Usage:       &UsageRepo{DB: db},
+		Collections: &CollectionRepo{DB: db},
+		Payments:    &PaymentEventRepo{DB: db},
 	}
 }

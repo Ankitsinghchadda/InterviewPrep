@@ -31,20 +31,26 @@ type Config struct {
 	FrontendURL       string
 	PostLoginRedirect string
 
-	// Google Cloud / Vertex AI
-	GCPProject     string
-	GCPLocation    string
-	AgentModel     string
-	AgentEnabled   bool // false => use stub reviewer (no GCP needed)
-	STTLanguage    string
+	// Google Cloud / Vertex AI (free-tier path)
+	GCPProject   string
+	GCPLocation  string
+	AgentModel   string // free-tier model on Vertex (e.g., gemini-2.5-flash)
+	AgentEnabled bool   // false => use stub reviewer (no GCP needed)
+	STTLanguage  string
+
+	// Gemini API (paid-tier path). When GeminiAPIKey is empty, Pro users
+	// transparently fall back to the Vertex/free agent.
+	GeminiAPIKey       string
+	GeminiPremiumModel string // paid-tier model via Gemini API (e.g., gemini-2.5-pro)
 
 	// Audio storage
 	AudioLocalDir string
 	MaxAudioBytes int64
 
 	// Reference-answer TTS (Google Cloud Text-to-Speech + GCS public bucket)
-	AudioBucket string // public bucket name; empty disables TTS
-	TTSVoice    string // e.g., en-US-Neural2-D
+	AudioBucket    string // public bucket name; empty disables TTS
+	TTSVoice       string // reference-answer voice (e.g., en-US-Neural2-D, male)
+	TTSPromptVoice string // interviewer-asking-the-question voice (e.g., en-US-Neural2-F, female)
 
 	// Resume upload
 	MaxResumeBytes int64
@@ -58,6 +64,16 @@ type Config struct {
 	// causes Create to return 409 unless the request carries ?force=true.
 	DedupWarnThreshold  float64
 	DedupBlockThreshold float64
+
+	// Razorpay Subscriptions. When RazorpayKeyID is empty, /billing/checkout
+	// returns 503 (config_missing) and the webhook route is not mounted —
+	// the rest of the app still runs so dev/staging without payment keys
+	// remains usable.
+	RazorpayKeyID         string
+	RazorpayKeySecret     string
+	RazorpayWebhookSecret string
+	RazorpayPlanMonthly   string // Razorpay plan_id for $25/month
+	RazorpayPlanBiannual  string // Razorpay plan_id for $100/6-month
 }
 
 func Load() *Config {
@@ -83,23 +99,33 @@ func Load() *Config {
 		FrontendURL:       getEnv("FRONTEND_URL", "http://localhost:5173"),
 		PostLoginRedirect: getEnv("POST_LOGIN_REDIRECT", "/"),
 
-		GCPProject:    getEnv("GOOGLE_CLOUD_PROJECT", ""),
-		GCPLocation:   getEnv("GOOGLE_CLOUD_LOCATION", "us-central1"),
-		AgentModel:    getEnv("AGENT_MODEL", "gemini-2.5-flash"),
-		AgentEnabled:  getBool("AGENT_ENABLED", false),
-		STTLanguage:   getEnv("STT_LANGUAGE", "en-US"),
+		GCPProject:   getEnv("GOOGLE_CLOUD_PROJECT", ""),
+		GCPLocation:  getEnv("GOOGLE_CLOUD_LOCATION", "us-central1"),
+		AgentModel:   getEnv("AGENT_MODEL", "gemini-2.5-flash"),
+		AgentEnabled: getBool("AGENT_ENABLED", false),
+		STTLanguage:  getEnv("STT_LANGUAGE", "en-US"),
+
+		GeminiAPIKey:       getEnv("GEMINI_API_KEY", ""),
+		GeminiPremiumModel: getEnv("GEMINI_PREMIUM_MODEL", "gemini-2.5-pro"),
 
 		AudioLocalDir:  getEnv("AUDIO_LOCAL_DIR", "./var/audio"),
 		MaxAudioBytes:  getInt64("MAX_AUDIO_BYTES", 15*1024*1024),   // 15MB ~ 5min webm/opus
 		MaxResumeBytes: getInt64("MAX_RESUME_BYTES", 10*1024*1024), // 10MB PDF cap
 
-		AudioBucket: getEnv("AUDIO_BUCKET", ""),
-		TTSVoice:    getEnv("TTS_VOICE", "en-US-Neural2-D"),
+		AudioBucket:    getEnv("AUDIO_BUCKET", ""),
+		TTSVoice:       getEnv("TTS_VOICE", "en-US-Neural2-D"),
+		TTSPromptVoice: getEnv("TTS_PROMPT_VOICE", "en-US-Neural2-F"),
 
 		DedupWarnThreshold:  getFloat("DEDUP_WARN_THRESHOLD", 0.78),
 		DedupBlockThreshold: getFloat("DEDUP_BLOCK_THRESHOLD", 0.88),
 
 		AdminEmails: parseEmailSet(getEnv("ADMIN_EMAILS", "")),
+
+		RazorpayKeyID:         getEnv("RAZORPAY_KEY_ID", ""),
+		RazorpayKeySecret:     getEnv("RAZORPAY_KEY_SECRET", ""),
+		RazorpayWebhookSecret: getEnv("RAZORPAY_WEBHOOK_SECRET", ""),
+		RazorpayPlanMonthly:   getEnv("RAZORPAY_PLAN_MONTHLY_ID", ""),
+		RazorpayPlanBiannual:  getEnv("RAZORPAY_PLAN_BIANNUAL_ID", ""),
 	}
 
 	if cfg.Env == "production" {

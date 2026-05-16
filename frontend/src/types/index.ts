@@ -41,6 +41,10 @@ export interface Question {
   answer: string
   difficulty: Difficulty
   answerAudioUrl?: string
+  /** TTS audio of the interviewer reading the question aloud. Only set on
+   *  live-interview questions, and arrives a beat after the question itself
+   *  since synthesis happens in the background. */
+  promptAudioUrl?: string
   explanationSummary?: string
   explanationMarkdown?: string
   ownerId?: string
@@ -81,6 +85,21 @@ export interface Submission {
   score?: number
   status: SubmissionStatus
   errorMessage?: string
+  createdAt: string
+  updatedAt: string
+}
+
+// Collection is a user-owned named list of questions. Every user has a
+// default "Saved" collection (isDefault = true) that acts as a one-click
+// bookmark; users can create additional named collections.
+export interface Collection {
+  id: string
+  userId: string
+  name: string
+  description?: string
+  color?: string
+  isDefault: boolean
+  questionCount: number
   createdAt: string
   updatedAt: string
 }
@@ -209,4 +228,46 @@ export interface User {
   // Derived from the backend's ADMIN_EMAILS allow-list. UI hint only — every
   // admin route is independently enforced server-side.
   isAdmin?: boolean
+
+  plan: 'free' | 'pro'
+  planPeriod?: 'monthly' | 'biannual' | ''
+  planStartedAt?: string
+  planExpiresAt?: string
+}
+
+// UsageKind mirrors backend billing.Kind. Keep these strings in sync with
+// internal/billing/quota.go.
+export type UsageKind =
+  | 'recording_review'
+  | 'mock_basic'
+  | 'mock_live'
+  | 'question_add'
+  | 'question_gen'
+  | 'answer_gen'
+  | 'explanation'
+  | 'tts'
+
+export interface UsageRow {
+  used: number
+  limit: number // -1 = unlimited
+  remaining: number // -1 = unlimited
+  blocked?: boolean // true when kind is not available on the user's plan at all
+}
+
+export interface UsageSnapshot {
+  plan: 'free' | 'pro'
+  planExpiresAt?: string
+  windowStart: string
+  quotas: Record<UsageKind, UsageRow>
+}
+
+// PaywallReason is what the interceptor stashes when a 402/403 lands.
+// 'quota_exceeded' fires when a free user hits the weekly cap on a kind
+// they're allowed in principle. 'plan_required' fires when the kind is
+// blocked entirely (e.g. mock_live for free).
+export interface PaywallReason {
+  error: 'quota_exceeded' | 'plan_required'
+  kind: UsageKind
+  requiredPlan?: 'pro'
+  plan?: 'free' | 'pro'
 }

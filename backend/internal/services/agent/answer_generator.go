@@ -8,7 +8,6 @@ import (
 
 	"google.golang.org/adk/agent"
 	"google.golang.org/adk/agent/llmagent"
-	"google.golang.org/adk/model/gemini"
 	"google.golang.org/adk/runner"
 	"google.golang.org/adk/session"
 	"google.golang.org/genai"
@@ -46,21 +45,10 @@ type VertexAnswerGenerator struct {
 	runner *runner.Runner
 }
 
-func NewVertexAnswerGenerator(ctx context.Context, project, location, modelName string) (*VertexAnswerGenerator, error) {
-	if project == "" {
-		return nil, errors.New("vertex answer generator: GOOGLE_CLOUD_PROJECT is required")
-	}
-	if modelName == "" {
-		modelName = "gemini-2.5-flash"
-	}
-	cfg := &genai.ClientConfig{
-		Backend:  genai.BackendVertexAI,
-		Project:  project,
-		Location: location,
-	}
-	model, err := gemini.NewModel(ctx, modelName, cfg)
+func NewAnswerGenerator(ctx context.Context, backend Backend, modelName, project, location, apiKey string) (*VertexAnswerGenerator, error) {
+	model, err := BuildGeminiModel(ctx, backend, modelName, project, location, apiKey)
 	if err != nil {
-		return nil, fmt.Errorf("vertex answer generator: build model: %w", err)
+		return nil, fmt.Errorf("answer generator: %w", err)
 	}
 	a, err := llmagent.New(llmagent.Config{
 		Name:        "answer_generator",

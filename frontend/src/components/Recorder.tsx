@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Mic, Square, Trash2 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
@@ -20,6 +20,8 @@ interface RecorderProps {
   busy?: boolean
   /** Hard cap on recording duration in seconds. */
   maxSeconds?: number
+  /** Fired the moment recording actually begins (after mic permission). */
+  onRecordingStart?: () => void
 }
 
 const PREFERRED_TYPES = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4']
@@ -33,7 +35,7 @@ function pickMimeType(): string {
   return ''
 }
 
-export function Recorder({ onSubmit, busy = false, maxSeconds = 90 }: RecorderProps) {
+export function Recorder({ onSubmit, busy = false, maxSeconds = 90, onRecordingStart }: RecorderProps) {
   const [state, setState] = useState<RecorderState>('idle')
   const [elapsed, setElapsed] = useState(0)
   const [blob, setBlob] = useState<Blob | null>(null)
@@ -224,7 +226,8 @@ export function Recorder({ onSubmit, busy = false, maxSeconds = 90 }: RecorderPr
     }, 200)
 
     setState('recording')
-  }, [blobUrl, cleanup, drawWaveform, speechSupported])
+    onRecordingStart?.()
+  }, [blobUrl, cleanup, drawWaveform, speechSupported, onRecordingStart])
 
   const stopRecording = useCallback(() => {
     mediaRecorderRef.current?.stop()
@@ -320,8 +323,25 @@ export function Recorder({ onSubmit, busy = false, maxSeconds = 90 }: RecorderPr
 
 // LiveCaption renders the live Web Speech transcript while the user is
 // speaking. Final words appear in the foreground colour; the in-flight interim
-// candidate appears dimmer because it can still change.
+// candidate appears dimmer because it can still change. The container auto-
+// scrolls to the latest text on every update so long answers don't visually
+// stall — the candidate sees their words landing without having to scroll.
 function LiveCaption({ interim, final }: { interim: string; final: string }) {
+  const scrollRef = useRef<HTMLDivElement | null>(null)
+  const sentinelRef = useRef<HTMLDivElement | null>(null)
+  // useLayoutEffect + rAF: ensures the DOM is fully laid out before we read
+  // scrollHeight. Safari occasionally returns stale heights from a plain
+  // useEffect, so we anchor a sentinel at the bottom and scroll to it.
+  useLayoutEffect(() => {
+    const el = scrollRef.current
+    const sentinel = sentinelRef.current
+    if (!el || !sentinel) return
+    const id = requestAnimationFrame(() => {
+      el.scrollTop = el.scrollHeight
+    })
+    return () => cancelAnimationFrame(id)
+  }, [interim, final])
+
   if (!interim && !final) {
     return (
       <div className="mt-3 rounded-md border border-border/40 bg-background/30 px-3 py-2 text-xs text-muted-foreground italic">
@@ -330,10 +350,14 @@ function LiveCaption({ interim, final }: { interim: string; final: string }) {
     )
   }
   return (
-    <div className="mt-3 max-h-32 overflow-y-auto rounded-md border border-border/40 bg-background/30 px-3 py-2 text-sm leading-relaxed">
+    <div
+      ref={scrollRef}
+      className="mt-3 max-h-60 overflow-y-auto rounded-md border border-border/40 bg-background/30 px-3 py-2 text-sm leading-relaxed"
+    >
       <span className="text-foreground">{final}</span>
       {final && interim ? ' ' : ''}
       <span className="text-muted-foreground">{interim}</span>
+      <div ref={sentinelRef} aria-hidden />
     </div>
   )
 }

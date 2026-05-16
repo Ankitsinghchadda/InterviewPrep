@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Ankitsinghchadda/InterviewPrep/internal/auth"
+	"github.com/Ankitsinghchadda/InterviewPrep/internal/billing"
 	"github.com/Ankitsinghchadda/InterviewPrep/internal/models"
 	"github.com/Ankitsinghchadda/InterviewPrep/internal/repository"
 	"github.com/Ankitsinghchadda/InterviewPrep/internal/services/tts"
@@ -41,6 +42,32 @@ func synthesizeAndStore(synth tts.Synthesizer, questions *repository.QuestionRep
 	}(q.ID, q.Answer)
 }
 
+// synthesizePromptAndStore generates the interviewer-asking-the-question audio
+// (the question Title, read aloud in the prompt voice) in the background and
+// persists the public URL on the question row. Best-effort, same shape as
+// synthesizeAndStore — failures are logged but never propagated. Used by the
+// live interview flow so the candidate can hear the question while reading it.
+func synthesizePromptAndStore(synth tts.Synthesizer, questions *repository.QuestionRepo, q *models.Question) {
+	if synth == nil || q == nil || q.Title == "" {
+		return
+	}
+	go func(id, title string) {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		url, err := synth.SynthesizePrompt(ctx, id, title)
+		if err != nil {
+			log.Printf("tts: synthesize prompt %s: %v", id, err)
+			return
+		}
+		if url == "" {
+			return
+		}
+		if err := questions.UpdatePromptAudioURL(ctx, id, url); err != nil {
+			log.Printf("tts: persist prompt audio url for %s: %v", id, err)
+		}
+	}(q.ID, q.Title)
+}
+
 // audioGenLocks serializes lazy generation per question to avoid two concurrent
 // requests both calling the TTS API for the same row.
 var audioGenLocks sync.Map // map[questionID]*sync.Mutex
@@ -59,6 +86,7 @@ func lockForQuestion(id string) *sync.Mutex {
 type AudioHandler struct {
 	Questions *repository.QuestionRepo
 	Synth     tts.Synthesizer
+	Billing   *billing.Service
 }
 
 type synthesizeAudioResponse struct {
@@ -107,6 +135,12 @@ func (h *AudioHandler) Generate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Charge quota only when we're actually going to call the TTS API.
+	// Cache hits above stay free.
+	if !checkQuota(w, r, h.Billing, billing.KindTTS) {
+		return
+	}
+
 	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 	defer cancel()
 	url, err := h.Synth.Synthesize(ctx, id, q.Answer)
@@ -122,5 +156,75 @@ func (h *AudioHandler) Generate(w http.ResponseWriter, r *http.Request) {
 		response.Err(w, http.StatusInternalServerError, "failed to persist audio url")
 		return
 	}
+	safeRecord(r.Context(), h.Billing, billing.KindTTS, map[string]any{"question_id": id})
+	response.OK(w, http.StatusOK, synthesizeAudioResponse{AudioURL: url})
+}
+
+// GeneratePrompt is POST /api/v1/questions/{id}/prompt-audio — synchronous on
+// first call, idempotent on subsequent calls. Returns the public URL of the
+// interviewer voice reading the question aloud. Used as a fallback by the live
+// interview UI when the background synthesis hasn't completed yet, and for
+// older live questions that pre-date the auto-generate path.
+func (h *AudioHandler) GeneratePrompt(w http.ResponseWriter, r *http.Request) {
+	if _, ok := auth.UserID(r.Context()); !ok {
+		response.Err(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	if h.Synth == nil {
+		response.Err(w, http.StatusServiceUnavailable, "audio synthesis is not configured")
+		return
+	}
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		response.Err(w, http.StatusBadRequest, "missing question id")
+		return
+	}
+
+	q, err := h.Questions.Get(r.Context(), id)
+	if errors.Is(err, repository.ErrNotFound) {
+		response.Err(w, http.StatusNotFound, "question not found")
+		return
+	}
+	if err != nil {
+		response.Err(w, http.StatusInternalServerError, "failed to load question")
+		return
+	}
+	if q.PromptAudioURL != "" {
+		response.OK(w, http.StatusOK, synthesizeAudioResponse{AudioURL: q.PromptAudioURL})
+		return
+	}
+
+	// Use a distinct lock namespace per kind so a concurrent answer-audio
+	// request doesn't block prompt synthesis for the same question.
+	mu := lockForQuestion("prompt:" + id)
+	mu.Lock()
+	defer mu.Unlock()
+
+	q, err = h.Questions.Get(r.Context(), id)
+	if err == nil && q.PromptAudioURL != "" {
+		response.OK(w, http.StatusOK, synthesizeAudioResponse{AudioURL: q.PromptAudioURL})
+		return
+	}
+
+	if !checkQuota(w, r, h.Billing, billing.KindTTS) {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	url, err := h.Synth.SynthesizePrompt(ctx, id, q.Title)
+	if err != nil {
+		response.Err(w, http.StatusBadGateway, "tts failed: "+err.Error())
+		return
+	}
+	if url == "" {
+		response.Err(w, http.StatusBadGateway, "tts returned empty url")
+		return
+	}
+	if err := h.Questions.UpdatePromptAudioURL(r.Context(), id, url); err != nil {
+		response.Err(w, http.StatusInternalServerError, "failed to persist audio url")
+		return
+	}
+	safeRecord(r.Context(), h.Billing, billing.KindTTS, map[string]any{"question_id": id, "kind": "prompt"})
 	response.OK(w, http.StatusOK, synthesizeAudioResponse{AudioURL: url})
 }

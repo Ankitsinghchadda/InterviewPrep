@@ -4,10 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/Ankitsinghchadda/InterviewPrep/internal/auth"
+	"github.com/Ankitsinghchadda/InterviewPrep/internal/billing"
 	"github.com/Ankitsinghchadda/InterviewPrep/internal/models"
 	"github.com/Ankitsinghchadda/InterviewPrep/internal/repository"
 	"github.com/Ankitsinghchadda/InterviewPrep/internal/services/agent"
@@ -28,6 +32,7 @@ type InterviewHandler struct {
 	Designer        agent.InterviewDesigner
 	LiveInterviewer agent.LiveInterviewer
 	Synth           tts.Synthesizer
+	Billing         *billing.Service
 	MaxAudioBytes   int64
 }
 
@@ -36,7 +41,12 @@ type startInterviewBody struct {
 	CategorySlugs   []string `json:"categories"`      // ignored in adaptive/live mode
 	Count           int      `json:"count"`           // topic/adaptive
 	DurationMinutes int      `json:"durationMinutes"` // live only: 15|30|45
+	JobDescription  string   `json:"jobDescription"`  // live only, optional; pasted by the candidate
 }
+
+// maxJobDescriptionChars caps the JD we accept from the client; the prompt
+// builder additionally truncates to 4000 chars before sending to the model.
+const maxJobDescriptionChars = 8000
 
 // Start creates an interview. In "topic" mode it picks random questions
 // matching the chosen categories. In "adaptive" mode it asks the designer
@@ -68,7 +78,11 @@ func (h *InterviewHandler) Start(w http.ResponseWriter, r *http.Request) {
 			response.Err(w, http.StatusBadRequest, "durationMinutes must be 15, 30, or 45")
 			return
 		}
-		h.startLive(w, r, userID, body.DurationMinutes)
+		jd := strings.TrimSpace(body.JobDescription)
+		if len(jd) > maxJobDescriptionChars {
+			jd = jd[:maxJobDescriptionChars]
+		}
+		h.startLive(w, r, userID, body.DurationMinutes, jd)
 		return
 	}
 
@@ -87,6 +101,9 @@ func (h *InterviewHandler) Start(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *InterviewHandler) startTopic(w http.ResponseWriter, r *http.Request, userID string, slugs []string, count int) {
+	if !checkQuota(w, r, h.Billing, billing.KindMockBasic) {
+		return
+	}
 	questions, err := h.Questions.PickRandom(r.Context(), slugs, userID, count)
 	if err != nil {
 		response.Err(w, http.StatusInternalServerError, "failed to pick questions")
@@ -116,12 +133,16 @@ func (h *InterviewHandler) startTopic(w http.ResponseWriter, r *http.Request, us
 		return
 	}
 	iv.Questions = questions
+	safeRecord(r.Context(), h.Billing, billing.KindMockBasic, map[string]any{"mode": "topic", "interview_id": iv.ID})
 	response.OK(w, http.StatusCreated, iv)
 }
 
 func (h *InterviewHandler) startAdaptive(w http.ResponseWriter, r *http.Request, userID string, count int) {
 	if h.Designer == nil {
 		response.Err(w, http.StatusServiceUnavailable, "adaptive interviews are not configured")
+		return
+	}
+	if !checkQuota(w, r, h.Billing, billing.KindMockBasic) {
 		return
 	}
 
@@ -200,6 +221,7 @@ func (h *InterviewHandler) startAdaptive(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	iv.Questions = created
+	safeRecord(r.Context(), h.Billing, billing.KindMockBasic, map[string]any{"mode": "adaptive", "interview_id": iv.ID})
 	response.OK(w, http.StatusCreated, iv)
 }
 
@@ -207,9 +229,12 @@ func (h *InterviewHandler) startAdaptive(w http.ResponseWriter, r *http.Request,
 // generated immediately by the live interviewer agent and persisted as a
 // regular question row (source='live'). Subsequent questions are generated
 // turn-by-turn via NextQuestion.
-func (h *InterviewHandler) startLive(w http.ResponseWriter, r *http.Request, userID string, durationMin int) {
+func (h *InterviewHandler) startLive(w http.ResponseWriter, r *http.Request, userID string, durationMin int, jobDescription string) {
 	if h.LiveInterviewer == nil {
 		response.Err(w, http.StatusServiceUnavailable, "live interviews are not configured")
+		return
+	}
+	if !checkQuota(w, r, h.Billing, billing.KindMockLive) {
 		return
 	}
 
@@ -231,6 +256,7 @@ func (h *InterviewHandler) startLive(w http.ResponseWriter, r *http.Request, use
 			ResumeText:      profile.ResumeText,
 		}
 	}
+	design.JobDescription = jobDescription
 
 	durationSeconds := durationMin * 60
 
@@ -241,6 +267,7 @@ func (h *InterviewHandler) startLive(w http.ResponseWriter, r *http.Request, use
 		Profile:          design,
 		History:          nil,
 		TimeRemainingSec: durationSeconds,
+		TotalDurationSec: durationSeconds,
 		IsFirst:          true,
 	})
 	if err != nil {
@@ -259,12 +286,14 @@ func (h *InterviewHandler) startLive(w http.ResponseWriter, r *http.Request, use
 		Mode:            "live",
 		QuestionIDs:     []string{q.ID},
 		DurationSeconds: durationSeconds,
+		JobDescription:  jobDescription,
 	})
 	if err != nil {
 		response.Err(w, http.StatusInternalServerError, "failed to create interview")
 		return
 	}
 	iv.Questions = []models.Question{*q}
+	safeRecord(r.Context(), h.Billing, billing.KindMockLive, map[string]any{"interview_id": iv.ID, "duration_min": durationMin})
 	response.OK(w, http.StatusCreated, iv)
 }
 
@@ -290,6 +319,10 @@ func (h *InterviewHandler) persistLiveQuestion(ctx context.Context, userID strin
 	})
 	if err == nil {
 		synthesizeAndStore(h.Synth, h.Questions, q)
+		// Live interviews need the interviewer voice asking the question,
+		// kicked off in parallel with answer-audio synthesis. The candidate
+		// hears it as soon as it's ready, before they start recording.
+		synthesizePromptAndStore(h.Synth, h.Questions, q)
 	}
 	return q, err
 }
@@ -373,24 +406,65 @@ func (h *InterviewHandler) NextQuestion(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	// Build history by zipping ordered questions with submissions.
+	// Build history by zipping ordered questions with submissions, and at the
+	// same time derive the coverage / score / pacing signals the live agent
+	// uses to decide between follow-up, pivot, and close.
 	subByQ := map[string]int{}
 	for i, s := range subs {
 		subByQ[s.QuestionID] = i
 	}
 	history := make([]agent.LiveTurn, 0, len(questions))
+	intentsCovered := map[string]int{}
+	var (
+		scoreSum float64
+		scoreN   int
+		turnSum  int
+		turnN    int
+	)
 	for _, q := range questions {
+		intentsCovered[q.Intent]++
 		idx, ok := subByQ[q.ID]
 		if !ok {
 			continue
 		}
 		s := subs[idx]
-		history = append(history, agent.LiveTurn{
+		turn := agent.LiveTurn{
 			QuestionTitle:   q.Title,
 			QuestionIntent:  q.Intent,
 			CandidateAnswer: s.Transcript,
-		})
+			AnswerStrengths: s.Strengths,
+			AnswerGaps:      s.Improvements,
+		}
+		if s.Score != nil {
+			score := *s.Score
+			turn.AnswerScore = &score
+			scoreSum += score
+			scoreN++
+		}
+		if !s.UpdatedAt.IsZero() && !q.CreatedAt.IsZero() {
+			d := int(s.UpdatedAt.Sub(q.CreatedAt).Seconds())
+			if d > 0 && d < 1200 { // sanity bound
+				turn.TurnDurationSec = d
+				turnSum += d
+				turnN++
+			}
+		}
+		history = append(history, turn)
 	}
+	var avgScore *float64
+	if scoreN > 0 {
+		v := scoreSum / float64(scoreN)
+		avgScore = &v
+	}
+	avgTurn := 240
+	if turnN > 0 {
+		avgTurn = turnSum / turnN
+	}
+	denom := avgTurn
+	if denom < 60 {
+		denom = 60
+	}
+	expectedRemaining := timeRemaining / denom
 
 	// Profile is optional.
 	var design agent.DesignInput
@@ -405,22 +479,40 @@ func (h *InterviewHandler) NextQuestion(w http.ResponseWriter, r *http.Request) 
 			ResumeText:      profile.ResumeText,
 		}
 	}
+	design.JobDescription = iv.JobDescription
 
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 	next, err := h.LiveInterviewer.NextQuestion(ctx, agent.NextQuestionInput{
-		Profile:          design,
-		History:          history,
-		TimeRemainingSec: timeRemaining,
-		IsFirst:          false,
+		Profile:                    design,
+		History:                    history,
+		TimeRemainingSec:           timeRemaining,
+		TotalDurationSec:           iv.DurationSeconds,
+		IsFirst:                    false,
+		IntentsCovered:             intentsCovered,
+		AvgScoreSoFar:              avgScore,
+		AvgTurnSec:                 avgTurn,
+		ExpectedRemainingQuestions: expectedRemaining,
 	})
 	if err != nil {
 		response.Err(w, http.StatusBadGateway, "next question generation failed: "+err.Error())
 		return
 	}
 
-	// Don't persist if the agent says wrap, or we're below the 60s floor.
-	if next.ShouldWrap || timeRemaining < 60 {
+	// Defensive: keep the persisted intent label consistent with is_follow_up
+	// so the next turn's coverage map and reviewer agent see the same shape.
+	if next.IsFollowUp {
+		next.Intent = "follow_up"
+	}
+
+	// Log the agent's choice for audit. Useful when the agent ignores the policy.
+	log.Printf("live next_question interview_id=%s intent=%s is_follow_up=%t wrap=%t time_remaining=%d expected_remaining=%d avg_score=%s rationale=%q",
+		interviewID, next.Intent, next.IsFollowUp, next.ShouldWrap, timeRemaining, expectedRemaining,
+		fmtAvgScore(avgScore), trimRationale(next.FollowUpRationale))
+
+	// Hard wrap floor — the agent owns most wrap logic now; keep a small
+	// safety floor so we never start a brand-new question with seconds left.
+	if next.ShouldWrap || timeRemaining < 30 {
 		response.OK(w, http.StatusOK, nextQuestionResponse{
 			Wrap:             true,
 			TimeRemainingSec: timeRemaining,
@@ -644,4 +736,19 @@ func (h *InterviewHandler) Complete(w http.ResponseWriter, r *http.Request) {
 	iv.Questions = questions
 	iv.Submissions = subs
 	response.OK(w, http.StatusOK, iv)
+}
+
+func fmtAvgScore(s *float64) string {
+	if s == nil {
+		return "n/a"
+	}
+	return fmt.Sprintf("%.0f", *s)
+}
+
+func trimRationale(s string) string {
+	s = strings.TrimSpace(s)
+	if len(s) > 160 {
+		s = s[:160]
+	}
+	return s
 }

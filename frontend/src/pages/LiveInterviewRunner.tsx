@@ -1,11 +1,13 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   CheckCircle2,
   Clock,
   Loader2,
   MessagesSquare,
+  Pause,
   ScrollText,
   Square,
+  Volume2,
   X,
 } from 'lucide-react'
 
@@ -20,6 +22,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Recorder, type RecordingPayload } from '@/components/Recorder'
+import { generateQuestionPromptAudio, getQuestion } from '@/services/questions'
 import { cn } from '@/lib/utils'
 
 // LiveInterviewRunner drives an agentic, time-bounded interview: one question
@@ -67,6 +70,13 @@ export function LiveInterviewRunner({
   const [advancing, setAdvancing] = useState(false)
   const [wrapping, setWrapping] = useState(false)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
+  const [userStartedSpeaking, setUserStartedSpeaking] = useState(false)
+
+  // Reset the "user has started" gate whenever a new question lands so the
+  // next prompt audio gets the chance to auto-play.
+  useEffect(() => {
+    setUserStartedSpeaking(false)
+  }, [currentQuestion?.id])
 
   const subStatus = poll.data?.status
   const subDone = subStatus === 'complete' || subStatus === 'failed'
@@ -180,9 +190,17 @@ export function LiveInterviewRunner({
           {currentQuestion && (
             <Card>
               <CardHeader>
-                <Badge variant="brand" className="w-fit">
-                  Interviewer
-                </Badge>
+                <div className="flex items-start justify-between gap-3">
+                  <Badge variant="brand" className="w-fit">
+                    Interviewer
+                  </Badge>
+                  <QuestionPromptPlayer
+                    questionId={currentQuestion.id}
+                    initialUrl={currentQuestion.promptAudioUrl}
+                    autoPlay
+                    pause={userStartedSpeaking}
+                  />
+                </div>
                 <CardTitle className="mt-2 text-xl leading-snug">
                   {currentQuestion.title}
                 </CardTitle>
@@ -197,6 +215,7 @@ export function LiveInterviewRunner({
             <Recorder
               key={currentQuestion.id}
               onSubmit={onSubmit}
+              onRecordingStart={() => setUserStartedSpeaking(true)}
               busy={submit.isPending}
               maxSeconds={recorderMax}
             />
@@ -298,6 +317,173 @@ function EndButton({ onClick, disabled }: { onClick: () => void; disabled: boole
       >
         <X className="size-3.5" />
       </Button>
+    </div>
+  )
+}
+
+// QuestionPromptPlayer renders the "Hear question" button. The interviewer-
+// voice URL is generated asynchronously on the server after the question is
+// created, so on first mount it may be empty — we poll the question record
+// for ~10s before falling back to an explicit synth call.
+//
+// When `autoPlay` is set the audio starts speaking the moment the URL lands,
+// provided the candidate hasn't already begun recording (`pause`). This keeps
+// the interview feeling natural — the question is heard, not just read — but
+// the audio gets out of the way the instant the candidate starts speaking.
+function QuestionPromptPlayer({
+  questionId,
+  initialUrl,
+  autoPlay = false,
+  pause = false,
+}: {
+  questionId: string
+  initialUrl?: string
+  autoPlay?: boolean
+  pause?: boolean
+}) {
+  const [url, setUrl] = useState<string>(initialUrl ?? '')
+  const [status, setStatus] = useState<'loading' | 'ready' | 'playing' | 'error'>(
+    initialUrl ? 'ready' : 'loading',
+  )
+  const [errorMsg, setErrorMsg] = useState<string | null>(null)
+
+  const audioRef = useRef<HTMLAudioElement | null>(null)
+  const autoPlayedForRef = useRef<string | null>(null)
+
+  // Reset whenever the question changes so we don't keep showing the old URL.
+  useEffect(() => {
+    setUrl(initialUrl ?? '')
+    setStatus(initialUrl ? 'ready' : 'loading')
+    setErrorMsg(null)
+    autoPlayedForRef.current = null
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [questionId])
+
+  // Auto-play the prompt once per question, as soon as the URL is ready and
+  // the candidate hasn't started recording. .play() can reject if the browser
+  // blocks autoplay; that's fine — the manual button remains.
+  useEffect(() => {
+    if (!autoPlay || pause) return
+    if (!url || status === 'loading' || status === 'error') return
+    if (autoPlayedForRef.current === questionId) return
+    const audio = audioRef.current
+    if (!audio) return
+    autoPlayedForRef.current = questionId
+    audio.currentTime = 0
+    void audio.play().catch(() => {})
+  }, [autoPlay, pause, status, url, questionId])
+
+  // If the candidate starts recording while audio is playing, stop talking.
+  useEffect(() => {
+    if (!pause) return
+    const audio = audioRef.current
+    if (audio && !audio.paused) audio.pause()
+  }, [pause])
+
+  // Poll the question record for promptAudioUrl. If after ~10s it still isn't
+  // there (background TTS failed or never ran), fall back to the explicit
+  // synth endpoint so the manual play button still works.
+  useEffect(() => {
+    if (url) return
+    let cancelled = false
+    let attempts = 0
+
+    async function tick() {
+      if (cancelled) return
+      attempts++
+      try {
+        const q = await getQuestion(questionId)
+        if (cancelled) return
+        if (q?.promptAudioUrl) {
+          setUrl(q.promptAudioUrl)
+          setStatus('ready')
+          return
+        }
+      } catch {
+        // Swallow; we'll keep polling. A real network outage will surface
+        // when the user clicks play and the lazy synth call also fails.
+      }
+      if (attempts >= 12) {
+        // ~12 * 800ms = ~10s. Try the lazy synth endpoint as a last resort.
+        try {
+          const u = await generateQuestionPromptAudio(questionId)
+          if (cancelled) return
+          if (u) {
+            setUrl(u)
+            setStatus('ready')
+            return
+          }
+        } catch (err) {
+          if (cancelled) return
+          setStatus('error')
+          setErrorMsg((err as Error)?.message ?? 'Could not load audio.')
+          return
+        }
+        setStatus('error')
+        setErrorMsg('Audio is taking too long.')
+        return
+      }
+      window.setTimeout(tick, 800)
+    }
+
+    tick()
+    return () => {
+      cancelled = true
+    }
+  }, [questionId, url])
+
+  const togglePlay = useCallback(() => {
+    const audio = audioRef.current
+    if (!audio || !url) return
+    if (audio.paused) {
+      audio.currentTime = 0
+      void audio.play().catch(() => {})
+    } else {
+      audio.pause()
+    }
+  }, [url])
+
+  if (status === 'loading') {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+        <Loader2 className="size-3.5 animate-spin" /> Audio…
+      </span>
+    )
+  }
+  if (status === 'error') {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-xs text-amber-300" title={errorMsg ?? undefined}>
+        <Volume2 className="size-3.5" /> Audio unavailable
+      </span>
+    )
+  }
+
+  return (
+    <div className="inline-flex items-center gap-2">
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={togglePlay}
+        aria-label={status === 'playing' ? 'Pause question audio' : 'Play question audio'}
+      >
+        {status === 'playing' ? (
+          <>
+            <Pause className="size-3.5" /> Pause
+          </>
+        ) : (
+          <>
+            <Volume2 className="size-3.5" /> Hear question
+          </>
+        )}
+      </Button>
+      <audio
+        ref={audioRef}
+        src={url}
+        preload="auto"
+        onPlay={() => setStatus('playing')}
+        onPause={() => setStatus('ready')}
+        onEnded={() => setStatus('ready')}
+      />
     </div>
   )
 }

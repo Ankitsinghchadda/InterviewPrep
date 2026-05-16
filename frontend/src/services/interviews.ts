@@ -6,6 +6,7 @@ export interface StartInterviewInput {
   categories: string[] // slugs (ignored in adaptive/live mode)
   count?: number // topic/adaptive only
   durationMinutes?: number // live mode: 15|30|45
+  jobDescription?: string // live mode only, optional
 }
 
 export interface NextLiveQuestionResponse {

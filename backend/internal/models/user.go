@@ -12,6 +12,13 @@ type User struct {
 	CreatedAt     time.Time  `json:"createdAt"`
 	UpdatedAt     time.Time  `json:"updatedAt"`
 	LastLoginAt   *time.Time `json:"lastLoginAt,omitempty"`
+
+	Plan                   string     `json:"plan"`
+	PlanPeriod             string     `json:"planPeriod,omitempty"`
+	PlanStartedAt          *time.Time `json:"planStartedAt,omitempty"`
+	PlanExpiresAt          *time.Time `json:"planExpiresAt,omitempty"`
+	RazorpayCustomerID     string     `json:"-"`
+	RazorpaySubscriptionID string     `json:"-"`
 }
 
 type RefreshToken struct {

@@ -19,6 +19,8 @@ import {
   getPublicQuestion,
   getQuestion,
   getSmartRecommendations,
+  listCollectionIdsForQuestion,
+  listQuestionSubmissions,
   listQuestions,
   type CreateQuestionInput,
   type FindSimilarInput,
@@ -27,6 +29,17 @@ import {
   type ListQuestionsParams,
   type QuestionExplanation,
 } from '@/services/questions'
+import {
+  addQuestionToCollection,
+  createCollection,
+  deleteCollection,
+  getCollection,
+  listCollections,
+  removeQuestionFromCollection,
+  updateCollection,
+  type CreateCollectionInput,
+  type UpdateCollectionInput,
+} from '@/services/collections'
 import { getStatsOverview } from '@/services/stats'
 import {
   getProfile,
@@ -44,9 +57,17 @@ import {
   submitInterviewAnswer,
   type StartInterviewInput,
 } from '@/services/interviews'
+import {
+  cancelSubscription,
+  getUsage,
+  startCheckout,
+  type CancelResult,
+  type CheckoutSession,
+} from '@/services/billing'
 import type {
   Category,
   CategoryKind,
+  Collection,
   Interview,
   Profile,
   Question,
@@ -54,6 +75,7 @@ import type {
   SmartRecommendations,
   StatsOverview,
   Submission,
+  UsageSnapshot,
 } from '@/types'
 
 export interface RecordingPayload {
@@ -137,6 +159,7 @@ export function useCreateQuestion() {
     mutationFn: (input: CreateQuestionInput) => createQuestion(input),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['questions'] })
+      void qc.invalidateQueries({ queryKey: ['usage'] })
     },
   })
 }
@@ -164,8 +187,12 @@ export function useSimilarQuestions(input: FindSimilarInput, debounceMs = 400) {
 // composing. Used by the "Generate" button; the caller writes the result back
 // into the form's textarea.
 export function useGenerateAnswerDraft() {
+  const qc = useQueryClient()
   return useMutation<string, Error, GenerateAnswerInput>({
     mutationFn: (input) => generateAnswerDraft(input),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['usage'] })
+    },
   })
 }
 
@@ -179,6 +206,7 @@ export function useGenerateQuestions() {
     mutationFn: (input) => generateQuestions(input),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['questions'] })
+      void qc.invalidateQueries({ queryKey: ['usage'] })
     },
   })
 }
@@ -200,6 +228,7 @@ export function useGenerateExplanation(questionId: string) {
             }
           : prev,
       )
+      void qc.invalidateQueries({ queryKey: ['usage'] })
     },
   })
 }
@@ -222,6 +251,7 @@ export function useSubmitAnswer(questionId: string) {
       submitAnswer(questionId, blob, transcript),
     onSuccess: (sub) => {
       qc.setQueryData<Submission>(['submission', sub.id], sub)
+      void qc.invalidateQueries({ queryKey: ['usage'] })
     },
   })
 }
@@ -342,8 +372,12 @@ export function useStreamSubmission(id: string | null | undefined): StreamSubmis
 // ---- Interview hooks ------------------------------------------------------
 
 export function useStartInterview() {
+  const qc = useQueryClient()
   return useMutation({
     mutationFn: (input: StartInterviewInput) => startInterview(input),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['usage'] })
+    },
   })
 }
 
@@ -446,5 +480,158 @@ export function useNextLiveQuestion(interviewId: string) {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['interview', interviewId] })
     },
+  })
+}
+
+// useUsage returns the rolling-window quota snapshot for the current user.
+// staleTime is short because the widget should reflect a fresh recording or
+// interview within a few seconds. Mutations that consume quota (create
+// question, start interview, submit recording, ...) call invalidateUsage()
+// below to refetch immediately.
+export function useUsage(enabled = true) {
+  return useQuery<UsageSnapshot>({
+    queryKey: ['usage'],
+    queryFn: getUsage,
+    enabled,
+    staleTime: 30_000,
+  })
+}
+
+// invalidateUsage forces a refetch of the usage snapshot. Call from any
+// mutation onSuccess that consumes a billable kind.
+export function invalidateUsage(qc: ReturnType<typeof useQueryClient>) {
+  void qc.invalidateQueries({ queryKey: ['usage'] })
+}
+
+// useStartCheckout creates a Razorpay subscription server-side and returns
+// the subscription_id + public key. The caller then opens the Razorpay
+// Checkout.js modal with those values. The actual user upgrade happens
+// on the webhook — this mutation doesn't change plan state directly.
+export function useStartCheckout() {
+  return useMutation<CheckoutSession, Error, 'monthly' | 'biannual'>({
+    mutationFn: (plan) => startCheckout(plan),
+  })
+}
+
+// useCancelSubscription marks the user's Razorpay subscription
+// cancel_at_cycle_end. Refetches /auth/me + /billing/usage so the UI
+// reflects the new state immediately.
+export function useCancelSubscription() {
+  const qc = useQueryClient()
+  return useMutation<CancelResult, Error>({
+    mutationFn: () => cancelSubscription(),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['usage'] })
+      void qc.invalidateQueries({ queryKey: ['me'] })
+    },
+  })
+}
+
+// ---- Collections + per-question history -----------------------------------
+
+export function useCollections(enabled = true) {
+  return useQuery<Collection[]>({
+    queryKey: ['collections'],
+    queryFn: () => listCollections(),
+    enabled,
+    staleTime: 30_000,
+  })
+}
+
+export function useCollection(id: string | undefined) {
+  return useQuery<Collection | null>({
+    queryKey: ['collection', id],
+    queryFn: () => getCollection(id!),
+    enabled: Boolean(id),
+  })
+}
+
+export function useCreateCollection() {
+  const qc = useQueryClient()
+  return useMutation<Collection, Error, CreateCollectionInput>({
+    mutationFn: (input) => createCollection(input),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['collections'] })
+    },
+  })
+}
+
+export function useUpdateCollection(id: string) {
+  const qc = useQueryClient()
+  return useMutation<Collection, Error, UpdateCollectionInput>({
+    mutationFn: (input) => updateCollection(id, input),
+    onSuccess: (c) => {
+      qc.setQueryData<Collection>(['collection', id], c)
+      void qc.invalidateQueries({ queryKey: ['collections'] })
+    },
+  })
+}
+
+export function useDeleteCollection() {
+  const qc = useQueryClient()
+  return useMutation<void, Error, string>({
+    mutationFn: (id) => deleteCollection(id),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['collections'] })
+    },
+  })
+}
+
+// useCollectionsForQuestion: ids of the caller's collections that already
+// include this question. Drives the bookmark indicator + Save-to-... menu.
+export function useCollectionsForQuestion(questionId: string | undefined) {
+  return useQuery<string[]>({
+    queryKey: ['question', questionId, 'collections'],
+    queryFn: () => listCollectionIdsForQuestion(questionId!),
+    enabled: Boolean(questionId),
+    staleTime: 30_000,
+  })
+}
+
+// useAddToCollection / useRemoveFromCollection — toggles handled by the
+// SaveToCollectionMenu. Both invalidate the per-question membership cache and
+// the affected collection's question count.
+export function useAddToCollection() {
+  const qc = useQueryClient()
+  return useMutation<
+    void,
+    Error,
+    { collectionId: string; questionId: string }
+  >({
+    mutationFn: ({ collectionId, questionId }) =>
+      addQuestionToCollection(collectionId, questionId),
+    onSuccess: (_, { questionId }) => {
+      void qc.invalidateQueries({ queryKey: ['question', questionId, 'collections'] })
+      void qc.invalidateQueries({ queryKey: ['collections'] })
+    },
+  })
+}
+
+export function useRemoveFromCollection() {
+  const qc = useQueryClient()
+  return useMutation<
+    void,
+    Error,
+    { collectionId: string; questionId: string }
+  >({
+    mutationFn: ({ collectionId, questionId }) =>
+      removeQuestionFromCollection(collectionId, questionId),
+    onSuccess: (_, { questionId, collectionId }) => {
+      void qc.invalidateQueries({ queryKey: ['question', questionId, 'collections'] })
+      void qc.invalidateQueries({ queryKey: ['collections'] })
+      void qc.invalidateQueries({ queryKey: ['questions', { inCollection: collectionId }] })
+    },
+  })
+}
+
+// useQuestionSubmissions: history of attempts the user has made on a single
+// question (newest first). Used by QuestionDetail's history panel and to
+// detect an in-flight submission to auto-resume the SSE stream.
+export function useQuestionSubmissions(questionId: string | undefined) {
+  return useQuery<Submission[]>({
+    queryKey: ['question', questionId, 'submissions'],
+    queryFn: () => listQuestionSubmissions(questionId!),
+    enabled: Boolean(questionId),
+    staleTime: 0,
   })
 }

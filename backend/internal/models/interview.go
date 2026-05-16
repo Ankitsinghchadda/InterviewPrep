@@ -13,6 +13,7 @@ type Interview struct {
 	StartedAt       time.Time  `json:"startedAt"`
 	FinishedAt      *time.Time `json:"finishedAt,omitempty"`
 	DurationSeconds int        `json:"durationSeconds,omitempty"` // live mode: 900|1800|2700; 0 for topic/adaptive
+	JobDescription  string     `json:"jobDescription,omitempty"`  // live mode only; empty when the candidate didn't paste one
 
 	// Optional, populated by GetInterview-style endpoints:
 	Questions   []Question   `json:"questions,omitempty"`

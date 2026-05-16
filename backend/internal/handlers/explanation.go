@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Ankitsinghchadda/InterviewPrep/internal/auth"
+	"github.com/Ankitsinghchadda/InterviewPrep/internal/billing"
 	"github.com/Ankitsinghchadda/InterviewPrep/internal/repository"
 	"github.com/Ankitsinghchadda/InterviewPrep/internal/services/agent"
 	"github.com/Ankitsinghchadda/InterviewPrep/pkg/response"
@@ -20,6 +21,7 @@ import (
 type ExplanationHandler struct {
 	Questions *repository.QuestionRepo
 	Explainer agent.Explainer
+	Billing   *billing.Service
 }
 
 type explanationResponse struct {
@@ -97,6 +99,10 @@ func (h *ExplanationHandler) Generate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !checkQuota(w, r, h.Billing, billing.KindExplanation) {
+		return
+	}
+
 	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 	defer cancel()
 	out, err := h.Explainer.Explain(ctx, agent.ExplainInput{
@@ -114,6 +120,7 @@ func (h *ExplanationHandler) Generate(w http.ResponseWriter, r *http.Request) {
 		response.Err(w, http.StatusInternalServerError, "failed to persist explanation")
 		return
 	}
+	safeRecord(r.Context(), h.Billing, billing.KindExplanation, map[string]any{"question_id": id})
 	response.OK(w, http.StatusOK, explanationResponse{
 		Summary:  out.Summary,
 		Markdown: out.Markdown,

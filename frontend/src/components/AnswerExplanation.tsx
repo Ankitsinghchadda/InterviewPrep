@@ -45,7 +45,6 @@ export function AnswerExplanation({ question }: { question: Question }) {
       <CardContent className="space-y-6">
         <SummarySection
           summary={summary}
-          fallback={question.answer}
           generating={generate.isPending}
           error={generate.error?.message ?? null}
           hasExplanation={hasExplanation || Boolean(generate.data)}
@@ -59,9 +58,7 @@ export function AnswerExplanation({ question }: { question: Question }) {
           </TabsList>
 
           <TabsContent value="reference">
-            <p className="whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground">
-              {question.answer}
-            </p>
+            <MarkdownView markdown={question.answer} />
           </TabsContent>
 
           <TabsContent value="full">
@@ -80,14 +77,12 @@ export function AnswerExplanation({ question }: { question: Question }) {
 
 function SummarySection({
   summary,
-  fallback,
   generating,
   error,
   hasExplanation,
   onGenerate,
 }: {
   summary: string
-  fallback: string
   generating: boolean
   error: string | null
   hasExplanation: boolean
@@ -100,38 +95,36 @@ function SummarySection({
         In simple terms
       </div>
       {summary ? (
-        <p className="text-sm leading-relaxed">{summary}</p>
+        <MarkdownView markdown={summary} compact />
       ) : (
-        <>
-          <p className="text-sm leading-relaxed text-muted-foreground">
-            {fallback}
+        <div className="flex flex-col gap-1">
+          <p className="text-sm text-muted-foreground">
+            Get a plain-English summary that frames the answer in a sentence or two.
           </p>
-          <div className="flex flex-col gap-1">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={onGenerate}
-              disabled={generating}
-              className="w-fit"
-            >
-              {generating ? (
-                <>
-                  <Loader2 className="size-4 animate-spin" /> Writing the explanation…
-                </>
-              ) : (
-                <>
-                  <Sparkles className="size-4" /> Generate friendly explanation
-                </>
-              )}
-            </Button>
-            {!generating && !hasExplanation && (
-              <span className="text-xs text-muted-foreground">
-                One click — generates a plain-English summary plus a deeper writeup with diagrams.
-              </span>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={onGenerate}
+            disabled={generating}
+            className="mt-1 w-fit"
+          >
+            {generating ? (
+              <>
+                <Loader2 className="size-4 animate-spin" /> Writing the explanation…
+              </>
+            ) : (
+              <>
+                <Sparkles className="size-4" /> Generate friendly explanation
+              </>
             )}
-            {error && <span className="text-xs text-red-300">{error}</span>}
-          </div>
-        </>
+          </Button>
+          {!generating && !hasExplanation && (
+            <span className="text-xs text-muted-foreground">
+              One click — also unlocks the deeper writeup with diagrams under Full explanation.
+            </span>
+          )}
+          {error && <span className="text-xs text-red-300">{error}</span>}
+        </div>
       )}
     </section>
   )
@@ -208,6 +201,7 @@ const mdComponents: Components = {
       {children}
     </a>
   ),
+  hr: () => <hr className="my-4 border-border/60" />,
   table: ({ children }) => (
     <div className="my-3 overflow-x-auto rounded-md border border-border">
       <table className="w-full border-collapse text-sm">{children}</table>
@@ -221,10 +215,36 @@ const mdComponents: Components = {
   td: ({ children }) => (
     <td className="border-b border-border/60 px-3 py-2 align-top">{children}</td>
   ),
+  // Render fenced code blocks via the `pre` override so we can show the
+  // language label and avoid the default `<pre><code>` double-wrap conflicting
+  // with our own styled container. Inline `code` is handled below.
+  pre: ({ children }) => {
+    const child = Array.isArray(children) ? children[0] : children
+    if (child && typeof child === 'object' && 'props' in child) {
+      const props = (child as { props: { className?: string; children?: unknown } }).props
+      const text = String(props.children ?? '').replace(/\n$/, '')
+      const lang = /language-(\w+)/.exec(props.className ?? '')?.[1]
+      if (lang === 'mermaid') {
+        return (
+          <Suspense
+            fallback={
+              <div className="my-4 rounded-md border border-border bg-card/40 p-3 text-xs text-muted-foreground">
+                Loading diagram…
+              </div>
+            }
+          >
+            <Mermaid chart={text} />
+          </Suspense>
+        )
+      }
+      return <CodeBlock code={text} lang={lang} />
+    }
+    return <pre>{children}</pre>
+  },
   code: ({ className, children, ...rest }) => {
-    const text = String(children ?? '').replace(/\n$/, '')
     const lang = /language-(\w+)/.exec(className ?? '')?.[1]
-    // Inline code: no language class. Render compactly.
+    // Inline code (no fence) — `pre` handles block code above. If react-markdown
+    // ever calls us for block code directly, fall through to a styled block.
     if (!lang) {
       return (
         <code
@@ -235,30 +255,32 @@ const mdComponents: Components = {
         </code>
       )
     }
-    if (lang === 'mermaid') {
-      return (
-        <Suspense
-          fallback={
-            <div className="my-4 rounded-md border border-border bg-card/40 p-3 text-xs text-muted-foreground">
-              Loading diagram…
-            </div>
-          }
-        >
-          <Mermaid chart={text} />
-        </Suspense>
-      )
-    }
     return (
-      <pre className="my-3 overflow-x-auto rounded-md border border-border bg-card/40 p-3 text-xs leading-relaxed">
-        <code className={`language-${lang} font-mono`}>{text}</code>
-      </pre>
+      <code className={`${className ?? ''} font-mono`} {...rest}>
+        {children}
+      </code>
     )
   },
 }
 
-function MarkdownView({ markdown }: { markdown: string }) {
+function CodeBlock({ code, lang }: { code: string; lang?: string }) {
   return (
-    <div className="text-foreground">
+    <div className="my-3 overflow-hidden rounded-md border border-border bg-card/40">
+      {lang && (
+        <div className="flex items-center justify-between border-b border-border/60 bg-card/60 px-3 py-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+          <span>{lang}</span>
+        </div>
+      )}
+      <pre className="overflow-x-auto p-3 text-xs leading-relaxed">
+        <code className={lang ? `language-${lang} font-mono` : 'font-mono'}>{code}</code>
+      </pre>
+    </div>
+  )
+}
+
+function MarkdownView({ markdown, compact = false }: { markdown: string; compact?: boolean }) {
+  return (
+    <div className={compact ? 'text-foreground [&>*:first-child]:mt-0 [&>*:last-child]:mb-0' : 'text-foreground'}>
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
         {markdown}
       </ReactMarkdown>
@@ -285,7 +307,11 @@ function AnswerAudioControl({
   }, [audioUrl])
 
   if (url) {
-    return <audio src={url} controls preload="metadata" className="h-9 w-full max-w-xs sm:w-auto" />
+    return (
+      <div className="flex w-full flex-col items-stretch gap-1 sm:w-auto sm:items-end">
+        <audio src={url} controls preload="metadata" className="w-full max-w-xs sm:w-72" />
+      </div>
+    )
   }
 
   const onGenerate = async () => {

@@ -5,6 +5,7 @@ import {
   ArrowRight,
   BookOpen,
   CheckCircle2,
+  ChevronDown,
   Flag,
   Loader2,
   Mic,
@@ -388,47 +389,98 @@ function PerQuestionRow({
           <ScorePill score={score} failed={failed} />
         </div>
       </CardHeader>
-      {submission?.feedback && (
-        <CardContent className="pt-0">
-          <p className="text-sm leading-relaxed text-foreground/85">{submission.feedback}</p>
-          {(submission.strengths?.length || submission.improvements?.length) ? (
-            <div className="mt-3 grid gap-3 sm:grid-cols-2">
-              {submission.strengths && submission.strengths.length > 0 && (
-                <div>
-                  <div className="mb-1 text-xs font-medium uppercase tracking-wider text-emerald-300">
-                    Strengths
-                  </div>
-                  <ul className="space-y-1 text-sm text-muted-foreground">
-                    {submission.strengths.map((s, i) => (
-                      <li key={i}>• {s}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-              {submission.improvements && submission.improvements.length > 0 && (
-                <div>
-                  <div className="mb-1 text-xs font-medium uppercase tracking-wider text-amber-300">
-                    Improvements
-                  </div>
-                  <ul className="space-y-1 text-sm text-muted-foreground">
-                    {submission.improvements.map((s, i) => (
-                      <li key={i}>• {s}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
+      <CardContent className="space-y-4 pt-0">
+        {submission?.feedback && (
+          <div>
+            <div className="mb-1 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+              Review
             </div>
-          ) : null}
-        </CardContent>
-      )}
-      {!submission && (
-        <CardContent className="pt-0">
+            <p className="text-sm leading-relaxed text-foreground/85">{submission.feedback}</p>
+          </div>
+        )}
+        {!submission && (
           <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
             <Mic className="size-3.5" /> No answer recorded.
           </p>
-        </CardContent>
-      )}
+        )}
+        {question.answer && <AiAnswerSection answer={question.answer} />}
+        {submission && (submission.strengths?.length || submission.improvements?.length) ? (
+          <StrengthsImprovementsToggle
+            strengths={submission.strengths ?? []}
+            improvements={submission.improvements ?? []}
+          />
+        ) : null}
+      </CardContent>
     </Card>
+  )
+}
+
+// AiAnswerSection renders the model first-person answer a strong candidate
+// would give. Always visible — this is the primary takeaway for the candidate
+// after the interview ends.
+function AiAnswerSection({ answer }: { answer: string }) {
+  return (
+    <div className="rounded-md border border-brand-500/30 bg-brand-500/5 px-3 py-3">
+      <div className="mb-1 flex items-center gap-1.5 text-xs font-medium uppercase tracking-wider text-brand-300">
+        <BookOpen className="size-3.5" /> AI suggested answer
+      </div>
+      <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground/90">{answer}</p>
+    </div>
+  )
+}
+
+// StrengthsImprovementsToggle puts the granular per-bullet review behind a
+// disclosure so the card stays scannable. The score and the prose review
+// above already tell the candidate how they did; the bullets are for the
+// deeper-dive moment.
+function StrengthsImprovementsToggle({
+  strengths,
+  improvements,
+}: {
+  strengths: string[]
+  improvements: string[]
+}) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="border-t border-border/40 pt-3">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wider text-muted-foreground transition hover:text-foreground"
+      >
+        Strengths &amp; improvements
+        <ChevronDown className={cn('size-3.5 transition-transform', open && 'rotate-180')} />
+      </button>
+      {open && (
+        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+          {strengths.length > 0 && (
+            <div>
+              <div className="mb-1 text-xs font-medium uppercase tracking-wider text-emerald-300">
+                Strengths
+              </div>
+              <ul className="space-y-1 text-sm text-muted-foreground">
+                {strengths.map((s, i) => (
+                  <li key={i}>• {s}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {improvements.length > 0 && (
+            <div>
+              <div className="mb-1 text-xs font-medium uppercase tracking-wider text-amber-300">
+                Improvements
+              </div>
+              <ul className="space-y-1 text-sm text-muted-foreground">
+                {improvements.map((s, i) => (
+                  <li key={i}>• {s}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   )
 }
 

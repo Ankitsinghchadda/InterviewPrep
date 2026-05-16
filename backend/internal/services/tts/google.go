@@ -21,20 +21,27 @@ const ttsByteLimit = 4800
 // produces MP3 bytes which are then written to the configured public bucket;
 // the public object URL is returned to the caller.
 type Google struct {
-	tts     *texttospeech.Client
-	storage *storage.Client
-	bucket  string
-	voice   string // e.g. en-US-Neural2-D
+	tts         *texttospeech.Client
+	storage     *storage.Client
+	bucket      string
+	voice       string // reference-answer voice (e.g. en-US-Neural2-D, male)
+	promptVoice string // interviewer-asking-the-question voice (e.g. en-US-Neural2-F, female)
 }
 
 // NewGoogle constructs the TTS service. Both clients use Application Default
 // Credentials, matching the rest of the GCP-backed services in the app.
-func NewGoogle(ctx context.Context, bucket, voice string) (*Google, error) {
+// promptVoice is used for the interviewer-prompt synthesis path; an empty
+// string defaults to a female Neural2 voice so the candidate hears a distinct
+// speaker from the reference-answer voice.
+func NewGoogle(ctx context.Context, bucket, voice, promptVoice string) (*Google, error) {
 	if bucket == "" {
 		return nil, errors.New("tts: AUDIO_BUCKET is required")
 	}
 	if voice == "" {
 		voice = "en-US-Neural2-D"
+	}
+	if promptVoice == "" {
+		promptVoice = "en-US-Neural2-F"
 	}
 	tc, err := texttospeech.NewClient(ctx)
 	if err != nil {
@@ -45,7 +52,7 @@ func NewGoogle(ctx context.Context, bucket, voice string) (*Google, error) {
 		_ = tc.Close()
 		return nil, fmt.Errorf("tts: build storage client: %w", err)
 	}
-	return &Google{tts: tc, storage: sc, bucket: bucket, voice: voice}, nil
+	return &Google{tts: tc, storage: sc, bucket: bucket, voice: voice, promptVoice: promptVoice}, nil
 }
 
 // Close releases the underlying GCP clients.
@@ -62,25 +69,37 @@ func (g *Google) Close() {
 }
 
 func (g *Google) Synthesize(ctx context.Context, questionID, text string) (string, error) {
+	return g.synthesizeAndStore(ctx, "questions/"+questionID+".mp3", text, g.voice)
+}
+
+// SynthesizePrompt synthesizes the interviewer asking the question. Stored
+// under a "-prompt.mp3" suffix so it lives alongside the answer audio without
+// collision, and uses the prompt voice (typically female) so the candidate
+// hears a different speaker from the reference-answer playback.
+func (g *Google) SynthesizePrompt(ctx context.Context, questionID, text string) (string, error) {
+	return g.synthesizeAndStore(ctx, "questions/"+questionID+"-prompt.mp3", text, g.promptVoice)
+}
+
+func (g *Google) synthesizeAndStore(ctx context.Context, key, text, voice string) (string, error) {
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return "", errors.New("tts: empty text")
 	}
-	if questionID == "" {
-		return "", errors.New("tts: empty question id")
+	if key == "" {
+		return "", errors.New("tts: empty key")
 	}
 	text = truncateForTTS(text, ttsByteLimit)
 
 	// Voice locale is derived from the voice name's "en-US-..." prefix so
-	// callers only need to set TTS_VOICE.
-	langCode := languageFromVoice(g.voice)
+	// callers only need to set the voice envs.
+	langCode := languageFromVoice(voice)
 	req := &ttspb.SynthesizeSpeechRequest{
 		Input: &ttspb.SynthesisInput{
 			InputSource: &ttspb.SynthesisInput_Text{Text: text},
 		},
 		Voice: &ttspb.VoiceSelectionParams{
 			LanguageCode: langCode,
-			Name:         g.voice,
+			Name:         voice,
 		},
 		AudioConfig: &ttspb.AudioConfig{
 			AudioEncoding: ttspb.AudioEncoding_MP3,
@@ -94,7 +113,6 @@ func (g *Google) Synthesize(ctx context.Context, questionID, text string) (strin
 		return "", errors.New("tts: empty audio response")
 	}
 
-	key := "questions/" + questionID + ".mp3"
 	obj := g.storage.Bucket(g.bucket).Object(key)
 	w := obj.NewWriter(ctx)
 	w.ContentType = "audio/mpeg"

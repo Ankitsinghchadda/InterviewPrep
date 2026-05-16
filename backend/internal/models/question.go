@@ -10,6 +10,7 @@ type Question struct {
 	Answer              string    `json:"answer"`
 	Difficulty          string    `json:"difficulty"`
 	AnswerAudioURL      string    `json:"answerAudioUrl,omitempty"`
+	PromptAudioURL      string    `json:"promptAudioUrl,omitempty"`
 	ExplanationSummary  string    `json:"explanationSummary,omitempty"`
 	ExplanationMarkdown string    `json:"explanationMarkdown,omitempty"`
 	OwnerID             *string   `json:"ownerId,omitempty"`

@@ -1,11 +1,16 @@
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useLocation, useParams } from 'react-router-dom'
 import { ArrowLeft, BookOpen, Loader2, Lock, Mic } from 'lucide-react'
 
 import { useAuth } from '@/auth/AuthContext'
-import { usePublicQuestion, useStreamSubmission, useSubmitAnswer } from '@/hooks/queries'
+import {
+  useQuestionSubmissions,
+  usePublicQuestion,
+  useStreamSubmission,
+  useSubmitAnswer,
+} from '@/hooks/queries'
 import { useSEO } from '@/hooks/useSEO'
-import type { Difficulty } from '@/types'
+import type { Difficulty, Submission } from '@/types'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -13,6 +18,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { AnswerExplanation } from '@/components/AnswerExplanation'
 import { Recorder, type RecordingPayload } from '@/components/Recorder'
 import { FeedbackCard } from '@/components/FeedbackCard'
+import { SaveToCollectionMenu } from '@/components/SaveToCollectionMenu'
+import { SubmissionHistoryList } from '@/components/SubmissionHistoryList'
 
 const DIFFICULTY_VARIANT: Record<Difficulty, 'success' | 'brand' | 'destructive'> = {
   easy: 'success',
@@ -27,9 +34,45 @@ export function QuestionDetail() {
   const isAuthed = authStatus === 'authenticated'
   const { data: question, isLoading, error } = usePublicQuestion(id)
 
-  const [submissionId, setSubmissionId] = useState<string | null>(null)
+  // Active submission id is now derived state: prefer (in order)
+  //   1. an id the user just kicked off in this tab (local state),
+  //   2. the most recent in-flight submission on this question from the DB,
+  //   3. the localStorage hint (covers the gap between submit success and the
+  //      next /submissions list refetch — and re-hydrates after a hard refresh).
+  // This means navigating away during streaming and coming back picks up
+  // exactly where we left off; the stream hook seeds from /submissions/{id}
+  // before the SSE events flow, so the UI repaints instantly.
+  const questionKey = question?.id || id || ''
+  const localKey = questionKey ? `activeSubmission:${questionKey}` : ''
+  const [localSubmissionId, setLocalSubmissionId] = useState<string | null>(() => {
+    if (typeof window === 'undefined' || !localKey) return null
+    return window.localStorage.getItem(localKey)
+  })
+  const { data: submissionHistory = [] } = useQuestionSubmissions(
+    isAuthed ? questionKey || undefined : undefined,
+  )
+
+  const inFlightFromServer = useMemo(
+    () => findInFlight(submissionHistory),
+    [submissionHistory],
+  )
+  const submissionId = localSubmissionId || inFlightFromServer?.id || null
+
   const submit = useSubmitAnswer(id || '')
   const stream = useStreamSubmission(submissionId)
+
+  // Persist + clear the localStorage hint based on the live stream state.
+  // We don't drop the hint until the stream reports terminal so back-nav
+  // mid-stream stays seamless even before the /submissions list refetches.
+  useEffect(() => {
+    if (typeof window === 'undefined' || !localKey) return
+    if (!submissionId) return
+    if (stream.status === 'complete' || stream.status === 'failed') {
+      window.localStorage.removeItem(localKey)
+      return
+    }
+    window.localStorage.setItem(localKey, submissionId)
+  }, [submissionId, stream.status, localKey])
 
   const loginHref = `/login?redirect=${encodeURIComponent(location.pathname + location.search)}`
 
@@ -136,14 +179,20 @@ export function QuestionDetail() {
   const onSubmit = async (payload: RecordingPayload) => {
     try {
       const sub = await submit.mutateAsync(payload)
-      setSubmissionId(sub.id)
+      setLocalSubmissionId(sub.id)
+      if (typeof window !== 'undefined' && localKey) {
+        window.localStorage.setItem(localKey, sub.id)
+      }
     } catch (err) {
       console.error('submit failed', err)
     }
   }
 
   const startOver = () => {
-    setSubmissionId(null)
+    setLocalSubmissionId(null)
+    if (typeof window !== 'undefined' && localKey) {
+      window.localStorage.removeItem(localKey)
+    }
     submit.reset()
   }
 
@@ -169,7 +218,10 @@ export function QuestionDetail() {
             </Badge>
           ))}
         </div>
-        <h1 className="text-xl font-bold tracking-tight sm:text-2xl md:text-3xl">{question.title}</h1>
+        <div className="flex items-start justify-between gap-3">
+          <h1 className="min-w-0 break-words text-xl font-bold tracking-tight sm:text-2xl md:text-3xl">{question.title}</h1>
+          {isAuthed && questionKey && <SaveToCollectionMenu questionId={questionKey} />}
+        </div>
         {question.body && <p className="text-sm text-muted-foreground sm:text-base">{question.body}</p>}
       </header>
 
@@ -278,10 +330,24 @@ export function QuestionDetail() {
                   )}
                 </>
               )}
+
+              <SubmissionHistoryList submissions={submissionHistory} hideId={submissionId} />
             </>
           )}
         </TabsContent>
       </Tabs>
     </article>
   )
+}
+
+// findInFlight picks the newest submission that's still in the review
+// pipeline. The history list is already sorted newest-first by the server,
+// so we just scan and return the first non-terminal row.
+function findInFlight(rows: Submission[]): Submission | null {
+  for (const r of rows) {
+    if (r.status !== 'complete' && r.status !== 'failed') {
+      return r
+    }
+  }
+  return null
 }

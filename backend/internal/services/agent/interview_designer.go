@@ -9,7 +9,6 @@ import (
 
 	"google.golang.org/adk/agent"
 	"google.golang.org/adk/agent/llmagent"
-	"google.golang.org/adk/model/gemini"
 	"google.golang.org/adk/runner"
 	"google.golang.org/adk/session"
 	"google.golang.org/genai"
@@ -24,7 +23,8 @@ type DesignInput struct {
 	TechStack       []string
 	Goals           string
 	ResumeText      string
-	Count           int // total questions in the plan
+	JobDescription  string // live mode only; empty in the adaptive flow
+	Count           int    // total questions in the plan
 }
 
 // PlannedQuestion is one question in the adaptive interview plan.
@@ -63,7 +63,7 @@ Return EXACTLY this JSON (no prose around it):
     {
       "title": "<the question, asked the way an interviewer would ask it>",
       "body": "<optional 1-line interviewer note: hints, what to listen for>",
-      "answer": "<a strong reference answer the AI reviewer will grade against — be specific>",
+      "answer": "<the model answer the candidate should hear back — first person, plain prose, 150–300 words, what a strong candidate would actually SAY>",
       "difficulty": "<easy | medium | hard, matched to seniority>",
       "intent": "<introduction | behavioral | technical | system_design | follow_up>",
       "categories": ["<optional category slugs from this set: frontend, backend, fullstack, system-architect, devops, javascript, react, typescript, css, node, go, databases, system-design, docker, kubernetes, ci-cd, security, behavioral>"]
@@ -73,7 +73,7 @@ Return EXACTLY this JSON (no prose around it):
 
 Rules:
 - Reference SPECIFICS from their resume/experience (project names, company, tech) when relevant — don't be generic.
-- "answer" must be a useful reference: bullet-points worth of substance, not a one-liner.
+- "answer" must be a first-person model answer the candidate could speak verbatim — full sentences, plain prose, 150–300 words, anchored with at least one concrete example or number. NO meta-language like "A strong answer should..." or "The candidate should...". NO bullets, headings, or code fences (this text is also read aloud by TTS).
 - Difficulty escalates from intro → behavioral → technical → system_design.
 - Output exactly the requested number of questions.`
 
@@ -81,21 +81,10 @@ type VertexInterviewDesigner struct {
 	runner *runner.Runner
 }
 
-func NewVertexInterviewDesigner(ctx context.Context, project, location, modelName string) (*VertexInterviewDesigner, error) {
-	if project == "" {
-		return nil, errors.New("vertex designer: GOOGLE_CLOUD_PROJECT is required")
-	}
-	if modelName == "" {
-		modelName = "gemini-2.5-flash"
-	}
-	cfg := &genai.ClientConfig{
-		Backend:  genai.BackendVertexAI,
-		Project:  project,
-		Location: location,
-	}
-	model, err := gemini.NewModel(ctx, modelName, cfg)
+func NewInterviewDesigner(ctx context.Context, backend Backend, modelName, project, location, apiKey string) (*VertexInterviewDesigner, error) {
+	model, err := BuildGeminiModel(ctx, backend, modelName, project, location, apiKey)
 	if err != nil {
-		return nil, fmt.Errorf("vertex designer: build model: %w", err)
+		return nil, fmt.Errorf("designer: %w", err)
 	}
 
 	a, err := llmagent.New(llmagent.Config{
@@ -236,7 +225,7 @@ func (StubInterviewDesigner) Design(_ context.Context, in DesignInput) (*Designe
 		{
 			Title:      "Walk me through your career so far and what you're looking for next.",
 			Body:       "Listen for clarity, recency of work, and motivation for moving roles.",
-			Answer:     "A strong answer is a 90-second arc: the candidate frames each role they've held in terms of impact, ties their growth into a thesis about what they want next, and ends with why this role specifically. They name technologies and projects without rambling.",
+			Answer:     "Sure — I've been building software for the last several years, mostly on the backend side. In my current role I own a service that sits in the request path for a meaningful share of our traffic, and the work I'm most proud of is a piece of that where we replaced a synchronous fan-out with a queue-backed pipeline and cut p99 latency roughly in half. Before that I was at a smaller team where I got a lot of breadth — I touched everything from the database layer up to the frontend, which I think made me a better engineer because I stopped seeing the stack as somebody else's problem. What I'm looking for next is a place where the engineering bar is genuinely high and there's real ownership — I'd rather go deep on one or two hard problems than touch ten shallow ones. The reason this role caught my eye is the problem space lines up with what I want to get better at, and the team seems to actually invest in engineering quality, not just talk about it.",
 			Difficulty: "easy",
 			Intent:     "introduction",
 			Categories: []string{role, "behavioral"},
@@ -244,7 +233,7 @@ func (StubInterviewDesigner) Design(_ context.Context, in DesignInput) (*Designe
 		{
 			Title:      "Tell me about a project from your most recent role that you're proud of and the hardest technical decision you made.",
 			Body:       "Probe for ownership, trade-offs, and what they'd do differently.",
-			Answer:     "STAR-style: clear context, technical detail on the problem, specific trade-off they weighed (eg consistency vs availability, sync vs async), the outcome with a concrete metric, and an honest reflection on what they'd change.",
+			Answer:     "The project I'm proudest of is a rewrite of our ingestion pipeline. The old system was a single synchronous path that fanned out to four downstream consumers, and once traffic doubled it started timing out under spikes. The hardest decision was whether to patch it with a thread-pool tuning pass — which I could ship in a week — or do the right thing and put a queue in front. I went with the queue, even though it meant a month of work and an at-least-once semantics conversation with every downstream team. The explicit trade-off I made was throughput-and-resilience versus exactly-once delivery — we picked throughput plus idempotency keys, because reconciliation was cheaper than back-pressuring the producers. After it shipped, p99 dropped about 60% and we stopped paging on traffic spikes. If I did it again I'd invest earlier in load tests — we caught one bug in production that a serious load test would have flagged in staging.",
 			Difficulty: "medium",
 			Intent:     "behavioral",
 			Categories: []string{"behavioral"},
@@ -252,7 +241,7 @@ func (StubInterviewDesigner) Design(_ context.Context, in DesignInput) (*Designe
 		{
 			Title:      fmt.Sprintf("How would you explain %s to someone joining your team who's new to it?", tech),
 			Body:       "Tests both depth of knowledge and ability to communicate it.",
-			Answer:     fmt.Sprintf("They should start from the model %s uses (memory, execution, runtime), call out its real-world strengths, identify the common foot-guns juniors hit, and give a small concrete example. Bonus for noting what NOT to use it for.", tech),
+			Answer:     fmt.Sprintf("The way I'd start is with the model %s actually uses under the hood — because most of the foot-guns a newcomer hits come from assuming it works like whatever language they came from. So I'd walk through how memory and execution flow, then give them one small example where the obvious mental model gives the wrong answer — those moments are when the model actually sticks. From there I'd talk about real-world strengths: the things %s makes easy that would be a pain elsewhere, and where the ecosystem is genuinely strong. I'd also be honest about what it's NOT a great fit for, because a junior engineer reaching for the wrong tool is usually how teams accumulate the kind of tech debt that's hard to unwind. The thing I'd land on is: read the standard library source for one or two packages you use every day, because that's where you actually internalize idiomatic style.", tech, tech),
 			Difficulty: "medium",
 			Intent:     "technical",
 			Categories: []string{role, strings.ToLower(strings.ReplaceAll(tech, " ", "-"))},
@@ -260,7 +249,7 @@ func (StubInterviewDesigner) Design(_ context.Context, in DesignInput) (*Designe
 		{
 			Title:      "Design a system that handles 1 million write requests per minute with idempotent semantics.",
 			Body:       "Standard system-design probe. Encourage thinking out loud.",
-			Answer:     "Strong answer covers: API design with an idempotency key, sharded write path (queue + worker fan-out), a deduplication store (Redis or DB unique index on key), retry/timeout semantics, observability, and at least one explicit trade-off (consistency window, cost of dedup window, replay strategy).",
+			Answer:     "Sure — at a million writes per minute, that's about seventeen thousand per second, so I'm thinking distributed from the start, not one beefy node. The first thing I'd put in is an idempotency key carried by the client on every request, typically a UUID, and the API layer would check that key against a dedup store before touching the database. For the dedup store I'd start with Redis with a TTL on each key, because the latency budget at the edge is tight; if persistence matters I'd back it with a unique index on the primary database as defense in depth. After the dedup check I'd push the write onto a partitioned queue — Kafka or equivalent — keyed by the customer or entity id so all writes for the same entity stay in order. Workers consume per-partition and apply writes. The trade-offs I'd call out explicitly: this gives me at-least-once delivery, so every consumer below the queue has to be idempotent too; and the dedup window is bounded by the TTL, so a replay after the TTL expires would slip through unless I make the unique index the real source of truth. For observability I'd publish queue lag and dedup-hit-rate — those two numbers tell you everything about whether the system is healthy.",
 			Difficulty: "hard",
 			Intent:     "system_design",
 			Categories: []string{"system-design"},
@@ -268,7 +257,7 @@ func (StubInterviewDesigner) Design(_ context.Context, in DesignInput) (*Designe
 		{
 			Title:      "Tell me about a time you disagreed with a teammate. How did you resolve it?",
 			Body:       "Listen for empathy + concrete resolution.",
-			Answer:     "A good answer picks a real technical or product disagreement (not personality), shows they understood the other side, used data or a small experiment to break the tie, and ends with an honest reflection. Avoids making the teammate the villain.",
+			Answer:     "Sure — a few months ago I disagreed with a teammate on whether to add a feature flag for a refactor we were rolling out. They argued the flag added complexity and a rollback path we'd never use; I thought without it we'd be one bad merge away from a Friday-night page. We talked it through and I realized their underlying concern was that flags get added and never removed — they were pushing back on a real anti-pattern, not on the rollout itself. So we agreed on the flag, but we also agreed on a removal date written into the ticket, and I owned the cleanup PR. It shipped, the flag came out two weeks later, and we ended up using the rollback exactly once when a downstream service started returning a slightly different schema — so the flag paid for itself. The thing I learned is that the strongest position is usually the one that takes the other person's objection seriously and bakes the answer into the plan, instead of arguing the objection away.",
 			Difficulty: "easy",
 			Intent:     "behavioral",
 			Categories: []string{"behavioral"},
@@ -284,7 +273,7 @@ func (StubInterviewDesigner) Design(_ context.Context, in DesignInput) (*Designe
 		out = append(out, PlannedQuestion{
 			Title:      "Walk me through a follow-up question on something you mentioned earlier.",
 			Body:       "Adaptive follow-up placeholder (set AGENT_ENABLED=true for tailored content).",
-			Answer:     "An honest, specific extension of an earlier topic with concrete trade-offs.",
+			Answer:     "To pick up on what I said earlier — the part I wanted to expand on is the trade-off I glossed over. The reason I didn't lead with it is that in the projects I had in mind, the load profile let us get away with a simpler approach for a long time. Once you scale past that point, though, you really do have to pick a side, and the right move is to be explicit about which guarantee you're willing to weaken — usually latency for consistency, or development speed for operational simplicity. A concrete example would be moving a write path from synchronous double-writes to an async outbox: it bought us throughput, but we had to invest real work into reconciling eventual consistency for downstream consumers.",
 			Difficulty: "medium",
 			Intent:     "follow_up",
 			Categories: []string{role},

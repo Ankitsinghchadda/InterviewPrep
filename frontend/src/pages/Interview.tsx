@@ -3,19 +3,26 @@ import { Link, useNavigate } from 'react-router-dom'
 import {
   ArrowRight,
   Briefcase,
+  CheckCircle2,
   Clock,
+  FileText,
   Layers,
   Loader2,
+  Lock,
+  Mic,
   MessagesSquare,
   PlayCircle,
   Sparkles,
   UserCircle2,
+  Zap,
 } from 'lucide-react'
 
+import { useAuth } from '@/auth/AuthContext'
 import { useCategories, useProfile, useStartInterview } from '@/hooks/queries'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { LiveJobDescriptionDialog } from '@/components/LiveJobDescriptionDialog'
 import { cn } from '@/lib/utils'
 
 const COUNTS = [3, 5, 8]
@@ -25,14 +32,18 @@ type Mode = 'topic' | 'adaptive' | 'live'
 
 export function Interview() {
   const navigate = useNavigate()
+  const { user } = useAuth()
   const { data: categories, isLoading: catsLoading } = useCategories()
   const { data: profile } = useProfile()
   const start = useStartInterview()
+  const isPro = user?.plan === 'pro'
 
   const [mode, setMode] = useState<Mode>('topic')
   const [selectedSlugs, setSelectedSlugs] = useState<Set<string>>(new Set())
   const [count, setCount] = useState(5)
   const [durationMinutes, setDurationMinutes] = useState<number>(30)
+  const [jobDescription, setJobDescription] = useState('')
+  const [jdOpen, setJdOpen] = useState(false)
 
   const roles = useMemo(() => (categories ?? []).filter((c) => c.kind === 'role'), [categories])
   const topics = useMemo(() => (categories ?? []).filter((c) => c.kind === 'topic'), [categories])
@@ -50,11 +61,13 @@ export function Interview() {
 
   const onStart = async () => {
     try {
+      const jd = jobDescription.trim()
       const iv = await start.mutateAsync({
         mode,
         categories: mode === 'topic' ? Array.from(selectedSlugs) : [],
         count: mode === 'live' ? undefined : count,
         durationMinutes: mode === 'live' ? durationMinutes : undefined,
+        jobDescription: mode === 'live' && jd ? jd : undefined,
       })
       navigate(`/interview/${iv.id}`)
     } catch (err) {
@@ -84,6 +97,11 @@ export function Interview() {
             </TabsTrigger>
             <TabsTrigger value="live" className="whitespace-nowrap">
               <MessagesSquare className="size-4" /> Live Interview
+              {!isPro && (
+                <span className="ml-1 inline-flex items-center gap-0.5 rounded bg-brand-500/20 px-1.5 py-0.5 text-[10px] font-semibold text-brand-200">
+                  <Lock className="size-2.5" /> Pro
+                </span>
+              )}
             </TabsTrigger>
           </TabsList>
         </div>
@@ -124,11 +142,18 @@ export function Interview() {
         </TabsContent>
 
         <TabsContent value="live" className="space-y-6">
-          <LiveExplainer
-            durationMinutes={durationMinutes}
-            onDurationChange={setDurationMinutes}
-            profile={profile}
-          />
+          {!isPro ? (
+            <LiveProGate />
+          ) : (
+            <LiveExplainer
+              durationMinutes={durationMinutes}
+              onDurationChange={setDurationMinutes}
+              profile={profile}
+              jobDescription={jobDescription}
+              onOpenJobDescription={() => setJdOpen(true)}
+              onClearJobDescription={() => setJobDescription('')}
+            />
+          )}
         </TabsContent>
       </Tabs>
 
@@ -172,7 +197,11 @@ export function Interview() {
           size="xl"
           variant="brand"
           onClick={onStart}
-          disabled={start.isPending || (mode === 'adaptive' && !onboarded)}
+          disabled={
+            start.isPending ||
+            (mode === 'adaptive' && !onboarded) ||
+            (mode === 'live' && !isPro)
+          }
           className="w-full sm:w-auto"
         >
           {start.isPending ? (
@@ -193,6 +222,13 @@ export function Interview() {
           )}
         </Button>
       </div>
+
+      <LiveJobDescriptionDialog
+        open={jdOpen}
+        onOpenChange={setJdOpen}
+        value={jobDescription}
+        onSave={setJobDescription}
+      />
     </section>
   )
 }
@@ -333,59 +369,162 @@ function LiveExplainer({
   durationMinutes,
   onDurationChange,
   profile,
+  jobDescription,
+  onOpenJobDescription,
+  onClearJobDescription,
 }: {
   durationMinutes: number
   onDurationChange: (n: number) => void
   profile: ReturnType<typeof useProfile>['data']
+  jobDescription: string
+  onOpenJobDescription: () => void
+  onClearJobDescription: () => void
 }) {
+  const hasJd = jobDescription.trim().length > 0
+
+  const resumeHint = profile?.resumeFilename
+    ? `Pulls from ${profile.resumeFilename}`
+    : 'Uses your profile (if set)'
+
   return (
     <div className="space-y-4">
-      <Card>
-        <CardHeader>
-          <div className="flex items-center gap-2">
-            <MessagesSquare className="size-4 text-brand-300" />
-            <CardTitle className="text-base">Real-interview simulation</CardTitle>
+      <div className="rounded-lg border border-brand-500/30 bg-brand-500/5 p-4">
+        <div className="flex items-start gap-3">
+          <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-brand-500/15 text-brand-300">
+            <MessagesSquare className="size-4" />
           </div>
-          <CardDescription>
-            One question at a time, voice-only, with an AI interviewer that asks dynamic
-            follow-ups based on your previous answer
-            {profile?.resumeFilename ? ' and your uploaded resume' : ' and your profile (if set)'}.
-            Feedback is hidden until the interview ends — just like the real thing.
-          </CardDescription>
-        </CardHeader>
-      </Card>
+          <div className="min-w-0 flex-1 space-y-2">
+            <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+              <h3 className="text-sm font-semibold text-foreground">Real-interview simulation</h3>
+              <p className="text-xs text-muted-foreground">
+                Feedback hidden until the interview ends — just like the real thing.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              <FeatureChip icon={Mic} label="Voice-only" />
+              <FeatureChip icon={Zap} label="Dynamic follow-ups" />
+              <FeatureChip icon={FileText} label={resumeHint} />
+            </div>
+          </div>
+        </div>
+      </div>
 
-      <Card>
-        <CardHeader>
-          <div className="flex items-center gap-2">
-            <Clock className="size-4 text-brand-300" />
-            <CardTitle className="text-base">How long?</CardTitle>
-          </div>
-          <CardDescription>
-            The clock counts down once you start. When time's up, you can finish your current
-            answer and the interview will wrap.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="flex flex-wrap gap-2">
-            {DURATIONS.map((n) => (
-              <button
-                key={n}
-                type="button"
-                onClick={() => onDurationChange(n)}
-                className={cn(
-                  'rounded-md border px-4 py-2 text-sm font-medium transition-colors',
-                  durationMinutes === n
-                    ? 'border-brand-400/60 bg-brand-500/15 text-brand-100'
-                    : 'border-border/60 bg-card/40 text-muted-foreground hover:border-border hover:text-foreground',
+      <div className="grid gap-4 md:grid-cols-2">
+        <Card className="flex flex-col">
+          <CardHeader className="pb-3">
+            <div className="flex items-center gap-2">
+              <Clock className="size-4 text-brand-300" />
+              <CardTitle className="text-base">How long?</CardTitle>
+            </div>
+            <CardDescription>
+              The clock counts down once you start. You can finish your current answer when time's up.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="mt-auto">
+            <div className="grid grid-cols-3 gap-2">
+              {DURATIONS.map((n) => (
+                <button
+                  key={n}
+                  type="button"
+                  onClick={() => onDurationChange(n)}
+                  className={cn(
+                    'rounded-md border px-3 py-2 text-sm font-medium transition-colors',
+                    durationMinutes === n
+                      ? 'border-brand-400/60 bg-brand-500/15 text-brand-100'
+                      : 'border-border/60 bg-card/40 text-muted-foreground hover:border-border hover:text-foreground',
+                  )}
+                >
+                  {n} min
+                </button>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="flex flex-col">
+          <CardHeader className="pb-3">
+            <div className="flex items-center gap-2">
+              <FileText className="size-4 text-brand-300" />
+              <CardTitle className="text-base">
+                Target role{' '}
+                <span className="text-xs font-normal text-muted-foreground">(optional)</span>
+              </CardTitle>
+            </div>
+            <CardDescription>
+              Paste a job description to tailor questions to a specific listing.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="mt-auto">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              {hasJd ? (
+                <div className="flex items-center gap-1.5 text-sm">
+                  <CheckCircle2 className="size-4 text-emerald-400" />
+                  <span className="text-foreground">JD added</span>
+                  <span className="text-xs text-muted-foreground">
+                    · {jobDescription.length.toLocaleString()} chars
+                  </span>
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground">No JD added.</p>
+              )}
+              <div className="flex gap-1.5">
+                <Button type="button" variant="outline" size="sm" onClick={onOpenJobDescription}>
+                  {hasJd ? 'Edit' : 'Add JD'}
+                </Button>
+                {hasJd && (
+                  <Button type="button" variant="ghost" size="sm" onClick={onClearJobDescription}>
+                    Clear
+                  </Button>
                 )}
-              >
-                {n} minutes
-              </button>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
     </div>
+  )
+}
+
+function FeatureChip({
+  icon: Icon,
+  label,
+}: {
+  icon: React.ComponentType<{ className?: string }>
+  label: string
+}) {
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full border border-border/60 bg-card/60 px-2 py-0.5 text-[11px] text-muted-foreground">
+      <Icon className="size-3 text-brand-300" />
+      {label}
+    </span>
+  )
+}
+
+// LiveProGate replaces the LiveExplainer for free users. Click the Start
+// button below — backend returns 403 plan_required, the api interceptor
+// opens the PaywallModal. We also expose an inline upgrade CTA here so
+// users don't have to hit a wall before discovering it's paid.
+function LiveProGate() {
+  return (
+    <Card className="border-brand-500/40">
+      <CardHeader>
+        <div className="flex items-center gap-2">
+          <Lock className="size-4 text-brand-300" />
+          <CardTitle className="text-base">Live interview is a Pro feature</CardTitle>
+        </div>
+        <CardDescription>
+          Live mode runs on the premium Gemini model — one question at a time, dynamic follow-ups
+          based on your last answer, voice-only, just like a real interview. Upgrade to unlock it
+          alongside unlimited AI reviews and mock interviews.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <Button asChild variant="brand">
+          <Link to="/pricing">
+            See Pro plans <ArrowRight className="size-4" />
+          </Link>
+        </Button>
+      </CardContent>
+    </Card>
   )
 }

@@ -2,7 +2,7 @@ import { useEffect } from 'react'
 
 const SITE_NAME = '10xInterview'
 const SITE_URL = 'https://10xinterview.com'
-const DEFAULT_IMAGE = `${SITE_URL}/og-image.png`
+const DEFAULT_IMAGE = `${SITE_URL}/og-image.jpg`
 
 export type SEOProps = {
   title: string

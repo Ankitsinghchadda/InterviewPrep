@@ -125,6 +125,38 @@ func (r *SubmissionRepo) ListForInterview(ctx context.Context, interviewID, user
 	return out, rows.Err()
 }
 
+// ListForUserAndQuestion returns every submission the user has made on this
+// question, newest first. Powers the per-question history surface and the
+// "resume in-flight stream" lookup (the handler filters by status).
+func (r *SubmissionRepo) ListForUserAndQuestion(ctx context.Context, userID, questionID string, limit int) ([]models.Submission, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+	const q = `
+		SELECT id, user_id, question_id, interview_id, audio_url, transcript, feedback,
+		       strengths, improvements, score, status, error_message, created_at, updated_at
+		FROM answer_submissions
+		WHERE user_id = $1 AND question_id = $2
+		ORDER BY created_at DESC
+		LIMIT $3
+	`
+	rows, err := r.DB.QueryContext(ctx, q, userID, questionID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := []models.Submission{}
+	for rows.Next() {
+		s, err := scanSubmission(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *s)
+	}
+	return out, rows.Err()
+}
+
 func (r *SubmissionRepo) ListForUser(ctx context.Context, userID string, limit int) ([]models.Submission, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 25

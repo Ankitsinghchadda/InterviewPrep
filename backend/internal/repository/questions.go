@@ -25,12 +25,13 @@ type ListQuestionsFilter struct {
 	Difficulty    string
 	OwnerID       string // when set, also includes questions owned by this user (private)
 	OnlyMine      bool   // when true, return ONLY this user's questions
+	CollectionID  string // when set, only questions in this collection (handler must verify ownership)
 	Limit         int
 }
 
 // selectColumns is shared across SELECTs so all paths populate the same fields.
 const selectColumns = `
-	q.id, q.slug, q.title, q.body, q.answer, q.difficulty, q.answer_audio_url,
+	q.id, q.slug, q.title, q.body, q.answer, q.difficulty, q.answer_audio_url, q.prompt_audio_url,
 	q.explanation_summary, q.explanation_markdown,
 	q.owner_id, q.is_public, q.source, q.intent, q.created_at,
 	COALESCE(
@@ -73,6 +74,14 @@ func buildScopeFilters(f ListQuestionsFilter, args *[]any, conds *[]string) (emp
 			SELECT qc.question_id FROM question_categories qc
 			JOIN categories c ON c.id = qc.category_id
 			WHERE c.slug = ANY($`+itoa(len(*args))+`)
+		)`)
+	}
+
+	if f.CollectionID != "" {
+		*args = append(*args, f.CollectionID)
+		*conds = append(*conds, `q.id IN (
+			SELECT cq.question_id FROM collection_questions cq
+			WHERE cq.collection_id = $`+itoa(len(*args))+`
 		)`)
 	}
 	return false
@@ -337,6 +346,15 @@ func (r *QuestionRepo) ListTitlesByCategories(ctx context.Context, slugs []strin
 func (r *QuestionRepo) UpdateAudioURL(ctx context.Context, id, url string) error {
 	_, err := r.DB.ExecContext(ctx,
 		`UPDATE questions SET answer_audio_url = $1 WHERE id = $2`, url, id)
+	return err
+}
+
+// UpdatePromptAudioURL persists the public URL for a question's synthesized
+// PROMPT audio — the interviewer voice reading the question aloud (separate
+// from the reference-answer audio above). Idempotent.
+func (r *QuestionRepo) UpdatePromptAudioURL(ctx context.Context, id, url string) error {
+	_, err := r.DB.ExecContext(ctx,
+		`UPDATE questions SET prompt_audio_url = $1 WHERE id = $2`, url, id)
 	return err
 }
 
@@ -783,7 +801,7 @@ func scanQuestion(row rowScanner) (*models.Question, error) {
 		cats  pq.StringArray
 	)
 	if err := row.Scan(
-		&q.ID, &slug, &q.Title, &q.Body, &q.Answer, &q.Difficulty, &q.AnswerAudioURL,
+		&q.ID, &slug, &q.Title, &q.Body, &q.Answer, &q.Difficulty, &q.AnswerAudioURL, &q.PromptAudioURL,
 		&q.ExplanationSummary, &q.ExplanationMarkdown,
 		&owner, &q.IsPublic, &q.Source, &q.Intent, &q.CreatedAt, &cats,
 	); err != nil {
@@ -934,7 +952,7 @@ func scanSearchHit(row rowScanner) (*SearchHit, error) {
 		snippet sql.NullString
 	)
 	if err := row.Scan(
-		&hit.ID, &slug, &hit.Title, &hit.Body, &hit.Answer, &hit.Difficulty, &hit.AnswerAudioURL,
+		&hit.ID, &slug, &hit.Title, &hit.Body, &hit.Answer, &hit.Difficulty, &hit.AnswerAudioURL, &hit.PromptAudioURL,
 		&hit.ExplanationSummary, &hit.ExplanationMarkdown,
 		&owner, &hit.IsPublic, &hit.Source, &hit.Intent, &hit.CreatedAt, &cats,
 		&hit.Score, &snippet,
@@ -1039,7 +1057,7 @@ func scanSimilarQuestion(row rowScanner) (*SimilarQuestion, error) {
 		cats  pq.StringArray
 	)
 	if err := row.Scan(
-		&sim.ID, &slug, &sim.Title, &sim.Body, &sim.Answer, &sim.Difficulty, &sim.AnswerAudioURL,
+		&sim.ID, &slug, &sim.Title, &sim.Body, &sim.Answer, &sim.Difficulty, &sim.AnswerAudioURL, &sim.PromptAudioURL,
 		&sim.ExplanationSummary, &sim.ExplanationMarkdown,
 		&owner, &sim.IsPublic, &sim.Source, &sim.Intent, &sim.CreatedAt, &cats,
 		&sim.Similarity,

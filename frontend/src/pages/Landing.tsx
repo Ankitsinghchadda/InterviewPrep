@@ -126,7 +126,7 @@ export function Landing() {
     <div className="relative isolate">
       {/* Hero */}
       <section className="relative overflow-hidden">
-        <div className="absolute inset-0 grid-bg radial-fade opacity-60" aria-hidden />
+        <div className="pointer-events-none absolute inset-0 -z-10 grid-bg radial-fade opacity-60" aria-hidden />
         <div
           aria-hidden
           className="absolute left-1/2 top-[-10rem] -z-10 h-[40rem] w-[60rem] -translate-x-1/2 rounded-full bg-gradient-to-br from-brand-500/30 via-fuchsia-500/15 to-transparent blur-3xl"
@@ -400,9 +400,7 @@ export function Landing() {
       <footer className="border-t border-border/60">
         <div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-4 px-4 py-8 text-xs text-muted-foreground sm:px-6 md:flex-row lg:px-8">
           <div className="flex items-center gap-2">
-            <span className="grid size-5 place-items-center rounded bg-gradient-to-br from-brand-400 to-brand-700 text-white">
-              <Sparkles className="size-3" />
-            </span>
+            <img src="/logo.png" alt="" aria-hidden="true" className="h-6 w-auto select-none" draggable={false} />
             <span>© {new Date().getFullYear()} 10xInterview</span>
           </div>
           <div className="flex items-center gap-4">

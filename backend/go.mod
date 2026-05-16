@@ -44,6 +44,7 @@ require (
 	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/pgvector/pgvector-go v0.3.0 // indirect
 	github.com/planetscale/vtprotobuf v0.6.1-0.20240319094008-0393e58bdf10 // indirect
+	github.com/razorpay/razorpay-go v1.4.1 // indirect
 	github.com/spiffe/go-spiffe/v2 v2.6.0 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/contrib/detectors/gcp v1.40.0 // indirect

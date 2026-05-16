@@ -1,6 +1,5 @@
 import { useEffect } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { Sparkles } from 'lucide-react'
 
 import { useAuth } from '@/auth/AuthContext'
 import { googleLoginURL } from '@/services/auth'
@@ -41,9 +40,12 @@ export function Login() {
     <div className="mx-auto flex min-h-[60vh] max-w-md items-center px-4 py-12">
       <Card className="w-full border-border/70">
         <CardHeader className="items-center text-center">
-          <span className="mb-3 grid size-10 place-items-center rounded-lg bg-gradient-to-br from-brand-400 to-brand-700 text-white shadow-md shadow-brand-700/30">
-            <Sparkles className="size-5" />
-          </span>
+          <img
+            src="/logo.png"
+            alt="10xInterview"
+            className="mb-4 h-20 w-auto select-none"
+            draggable={false}
+          />
           <CardTitle className="text-2xl">Sign in to 10xInterview</CardTitle>
           <CardDescription>Use your Google account to continue.</CardDescription>
         </CardHeader>

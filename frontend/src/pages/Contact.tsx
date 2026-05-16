@@ -66,7 +66,7 @@ export function Contact() {
   return (
     <div className="relative isolate">
       <section className="relative overflow-hidden">
-        <div className="absolute inset-0 grid-bg radial-fade opacity-60" aria-hidden />
+        <div className="pointer-events-none absolute inset-0 -z-10 grid-bg radial-fade opacity-60" aria-hidden />
         <div
           aria-hidden
           className="absolute left-1/2 top-[-10rem] -z-10 h-[40rem] w-[60rem] -translate-x-1/2 rounded-full bg-gradient-to-br from-brand-500/30 via-fuchsia-500/15 to-transparent blur-3xl"

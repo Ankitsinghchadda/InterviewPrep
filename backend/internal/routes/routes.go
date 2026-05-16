@@ -4,11 +4,13 @@ import (
 	"net/http"
 
 	"github.com/Ankitsinghchadda/InterviewPrep/internal/auth"
+	"github.com/Ankitsinghchadda/InterviewPrep/internal/billing"
 	"github.com/Ankitsinghchadda/InterviewPrep/internal/config"
 	"github.com/Ankitsinghchadda/InterviewPrep/internal/handlers"
 	appmw "github.com/Ankitsinghchadda/InterviewPrep/internal/middleware"
 	"github.com/Ankitsinghchadda/InterviewPrep/internal/repository"
 	"github.com/Ankitsinghchadda/InterviewPrep/internal/services/agent"
+	rzp "github.com/Ankitsinghchadda/InterviewPrep/internal/services/billing"
 	"github.com/Ankitsinghchadda/InterviewPrep/internal/services/embeddings"
 	"github.com/Ankitsinghchadda/InterviewPrep/internal/services/submissions"
 	"github.com/Ankitsinghchadda/InterviewPrep/internal/services/tts"
@@ -34,6 +36,8 @@ type Deps struct {
 	QuestionGen     agent.QuestionGenerator // bulk-generates new questions for a skill
 	Synth           tts.Synthesizer
 	Embedder        embeddings.Embedder // nil disables semantic search + dedup
+	Billing         *billing.Service
+	Razorpay        *rzp.Service // nil disables payment endpoints + webhook
 }
 
 func New(d Deps) http.Handler {
@@ -63,6 +67,9 @@ func New(d Deps) http.Handler {
 	r.Get("/api/v1/public/categories", publicCategoryH.List)
 	r.Get("/api/v1/public/categories/{slug}", publicCategoryH.Get)
 
+	// Razorpay webhook lives outside /api/v1 so it skips the cookie auth
+	// middleware. HMAC signature is verified inside the handler.
+
 	authH := &handlers.AuthHandler{
 		Service:     d.AuthService,
 		Users:       d.Repo.Users,
@@ -81,11 +88,13 @@ func New(d Deps) http.Handler {
 	questionH := &handlers.QuestionHandler{
 		Repo:              d.Repo.Questions,
 		Profiles:          d.Repo.Profiles,
+		Collections:       d.Repo.Collections,
 		Submitter:         d.Submitter,
 		Synth:             d.Synth,
 		Embedder:          d.Embedder,
 		AnswerGenerator:   d.AnswerGen,
 		QuestionGenerator: d.QuestionGen,
+		Billing:           d.Billing,
 		MaxAudioBytes:     d.Config.MaxAudioBytes,
 		WarnThreshold:     d.Config.DedupWarnThreshold,
 		BlockThreshold:    d.Config.DedupBlockThreshold,
@@ -93,10 +102,12 @@ func New(d Deps) http.Handler {
 	audioH := &handlers.AudioHandler{
 		Questions: d.Repo.Questions,
 		Synth:     d.Synth,
+		Billing:   d.Billing,
 	}
 	explanationH := &handlers.ExplanationHandler{
 		Questions: d.Repo.Questions,
 		Explainer: d.Explainer,
+		Billing:   d.Billing,
 	}
 	interviewH := &handlers.InterviewHandler{
 		Interviews:      d.Repo.Interviews,
@@ -109,6 +120,7 @@ func New(d Deps) http.Handler {
 		Designer:        d.Designer,
 		LiveInterviewer: d.LiveInterviewer,
 		Synth:           d.Synth,
+		Billing:         d.Billing,
 		MaxAudioBytes:   d.Config.MaxAudioBytes,
 	}
 	submissionH := &handlers.SubmissionHandler{
@@ -124,8 +136,20 @@ func New(d Deps) http.Handler {
 		Repo:     d.Repo.Stats,
 		Profiles: d.Repo.Profiles,
 	}
+	billingH := &handlers.BillingHandler{
+		Users:          d.Repo.Users,
+		Payments:       d.Repo.Payments,
+		Billing:        d.Billing,
+		Razorpay:       d.Razorpay,
+		PlanMonthlyID:  d.Config.RazorpayPlanMonthly,
+		PlanBiannualID: d.Config.RazorpayPlanBiannual,
+		AdminEmails:    d.Config.AdminEmails,
+	}
+	collectionH := &handlers.CollectionHandler{
+		Repo: d.Repo.Collections,
+	}
 
-	requireAuth := auth.Authenticator(d.TokenManager)
+	requireAuth := auth.Authenticator(d.TokenManager, d.Repo.Users, d.Config.AdminEmails)
 
 	r.Route("/auth", func(r chi.Router) {
 		r.Get("/google/login", authH.Login)
@@ -161,13 +185,26 @@ func New(d Deps) http.Handler {
 			r.Delete("/{id}", questionH.Delete)
 			r.Post("/{id}/answer", questionH.SubmitAnswer)
 			r.Post("/{id}/audio", audioH.Generate)
+			r.Post("/{id}/prompt-audio", audioH.GeneratePrompt)
 			r.Post("/{id}/explanation", explanationH.Generate)
+			r.Get("/{id}/submissions", submissionH.ListForQuestion)
+			r.Get("/{id}/collections", questionH.CollectionsForQuestion)
 		})
 
 		r.Route("/submissions", func(r chi.Router) {
 			r.Get("/", submissionH.ListMine)
 			r.Get("/{id}", submissionH.Get)
 			r.Get("/{id}/stream", submissionH.Stream)
+		})
+
+		r.Route("/collections", func(r chi.Router) {
+			r.Get("/", collectionH.List)
+			r.Post("/", collectionH.Create)
+			r.Get("/{id}", collectionH.Get)
+			r.Patch("/{id}", collectionH.Update)
+			r.Delete("/{id}", collectionH.Delete)
+			r.Post("/{id}/questions", collectionH.AddQuestion)
+			r.Delete("/{id}/questions/{qid}", collectionH.RemoveQuestion)
 		})
 
 		r.Route("/interviews", func(r chi.Router) {
@@ -182,7 +219,18 @@ func New(d Deps) http.Handler {
 		r.Route("/stats", func(r chi.Router) {
 			r.Get("/overview", statsH.Overview)
 		})
+
+		r.Route("/billing", func(r chi.Router) {
+			r.Get("/usage", billingH.Usage)
+			r.Get("/plans", billingH.Plans)
+			r.Post("/checkout", billingH.Checkout)
+			r.Post("/cancel", billingH.Cancel)
+		})
 	})
+
+	// Webhook is mounted at the root so Razorpay's POST hits a stable URL.
+	// h.Razorpay nil-check inside the handler returns 503 when unconfigured.
+	r.Post("/webhooks/razorpay", billingH.Webhook)
 
 	return r
 }

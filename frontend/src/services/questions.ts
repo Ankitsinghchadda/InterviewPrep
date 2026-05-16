@@ -17,6 +17,8 @@ export interface ListQuestionsParams {
   // Free-text query. When set, the API runs hybrid semantic + keyword search
   // and the response carries `score` and `snippet` per row.
   q?: string
+  // Only questions that belong to this collection (caller must own it).
+  inCollection?: string
 }
 
 export async function listQuestions(params: ListQuestionsParams = {}): Promise<Question[]> {
@@ -26,7 +28,26 @@ export async function listQuestions(params: ListQuestionsParams = {}): Promise<Q
   if (params.mine) search.mine = 'true'
   if (params.limit) search.limit = String(params.limit)
   if (params.q && params.q.trim()) search.q = params.q.trim()
+  if (params.inCollection) search.in_collection = params.inCollection
   const { data } = await api.get<ApiEnvelope<Question[]>>('/questions', { params: search })
+  return data.data ?? []
+}
+
+// listCollectionIdsForQuestion returns the ids of the caller's collections
+// that already include the given question. Drives the bookmark indicator and
+// "Save to..." menu without pulling the full collection rows.
+export async function listCollectionIdsForQuestion(id: string): Promise<string[]> {
+  const { data } = await api.get<ApiEnvelope<string[]>>(`/questions/${id}/collections`)
+  return data.data ?? []
+}
+
+// listQuestionSubmissions returns the caller's submission history for one
+// question, newest first. Used by QuestionDetail's history panel and the
+// in-flight stream resume logic.
+export async function listQuestionSubmissions(id: string): Promise<import('@/types').Submission[]> {
+  const { data } = await api.get<ApiEnvelope<import('@/types').Submission[]>>(
+    `/questions/${id}/submissions`,
+  )
   return data.data ?? []
 }
 
@@ -156,6 +177,17 @@ export async function generateQuestions(
 export async function generateQuestionAudio(id: string): Promise<string> {
   const { data } = await api.post<ApiEnvelope<{ audioUrl: string }>>(
     `/questions/${id}/audio`,
+  )
+  if (!data.data?.audioUrl) throw new Error(data.error || 'failed to generate audio')
+  return data.data.audioUrl
+}
+
+// generateQuestionPromptAudio synthesizes (or returns cached) the interviewer
+// voice reading the question aloud. Used by the live interview runner as a
+// fallback when the background-generated URL hasn't appeared yet.
+export async function generateQuestionPromptAudio(id: string): Promise<string> {
+  const { data } = await api.post<ApiEnvelope<{ audioUrl: string }>>(
+    `/questions/${id}/prompt-audio`,
   )
   if (!data.data?.audioUrl) throw new Error(data.error || 'failed to generate audio')
   return data.data.audioUrl

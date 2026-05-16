@@ -10,7 +10,6 @@ import (
 
 	"google.golang.org/adk/agent"
 	"google.golang.org/adk/agent/llmagent"
-	"google.golang.org/adk/model/gemini"
 	"google.golang.org/adk/runner"
 	"google.golang.org/adk/session"
 	"google.golang.org/genai"
@@ -42,25 +41,13 @@ Rules:
 - Be specific. Avoid generic phrases like "good answer".
 - If the answer is empty or off-topic, score low (under 30) and explain why.`
 
-// NewVertex constructs a Reviewer backed by an ADK llmagent + runner against Vertex AI.
-// Requires Application Default Credentials with access to the Vertex AI API.
-func NewVertex(ctx context.Context, project, location, modelName string) (*Vertex, error) {
-	if project == "" {
-		return nil, errors.New("vertex: GOOGLE_CLOUD_PROJECT is required")
-	}
-	if modelName == "" {
-		modelName = "gemini-2.5-flash"
-	}
-
-	clientCfg := &genai.ClientConfig{
-		Backend:  genai.BackendVertexAI,
-		Project:  project,
-		Location: location,
-	}
-
-	model, err := gemini.NewModel(ctx, modelName, clientCfg)
+// NewReviewer constructs a Reviewer backed by an ADK llmagent + runner.
+// backend selects Vertex AI (free tier, flash) or the Gemini API (paid tier,
+// pro). The caller passes whichever set of credentials is relevant.
+func NewReviewer(ctx context.Context, backend Backend, modelName, project, location, apiKey string) (*Vertex, error) {
+	model, err := BuildGeminiModel(ctx, backend, modelName, project, location, apiKey)
 	if err != nil {
-		return nil, fmt.Errorf("vertex: build gemini model: %w", err)
+		return nil, fmt.Errorf("reviewer: %w", err)
 	}
 
 	a, err := llmagent.New(llmagent.Config{

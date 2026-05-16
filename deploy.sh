@@ -160,7 +160,18 @@ log "Secret Manager"
 upsert_secret() {
   # Only writes a new version if the secret didn't exist (so DATABASE_URL
   # keeps the same DB_PASSWORD on re-runs, matching what's in Cloud SQL).
+  # Empty values are skipped — gcloud rejects 0-byte payloads, and we'd
+  # rather leave optional secrets (Gemini key, Razorpay creds) unmounted than
+  # crash a first-run deploy where the user hasn't supplied them yet.
   local NAME=$1 VALUE=$2
+  if [[ -z "$VALUE" ]]; then
+    if gcloud secrets describe "$NAME" >/dev/null 2>&1; then
+      done_ "Secret ${NAME} exists; leaving versions as-is"
+    else
+      done_ "Skipping ${NAME} (no value provided)"
+    fi
+    return
+  fi
   if gcloud secrets describe "$NAME" >/dev/null 2>&1; then
     done_ "Secret ${NAME} already exists (not overwriting)"
   else
@@ -172,6 +183,13 @@ upsert_secret() {
 upsert_secret jwt-secret               "$JWT_SECRET"
 upsert_secret google-oauth-client-secret "$GOOGLE_CLIENT_SECRET"
 upsert_secret database-url             "$DATABASE_URL"
+# Premium Gemini key + Razorpay credentials. First-run defaults are empty;
+# `upsert_secret` won't overwrite, so once you push real values with
+# `gcloud secrets versions add` they survive subsequent re-runs.
+upsert_secret gemini-api-key           "${GEMINI_API_KEY:-}"
+upsert_secret razorpay-key-id          "${RAZORPAY_KEY_ID:-}"
+upsert_secret razorpay-key-secret      "${RAZORPAY_KEY_SECRET:-}"
+upsert_secret razorpay-webhook-secret  "${RAZORPAY_WEBHOOK_SECRET:-}"
 
 # ─── 5. Audio bucket (public read for TTS playback) ────────────────────────
 log "GCS audio bucket: gs://${AUDIO_BUCKET}"
@@ -188,6 +206,24 @@ done_ "allUsers granted objectViewer (public read)"
 
 # ─── 6. Deploy backend (Cloud Run service) ─────────────────────────────────
 log "Deploying ${API_SERVICE} (Cloud Run, Go)"
+
+# Required secrets are always mounted. Optional secrets (Gemini key, Razorpay)
+# are mounted only when they exist with a version — Cloud Run would fail to
+# start if we referenced a missing :latest, so we probe first.
+SECRET_MOUNTS="JWT_SECRET=jwt-secret:latest"
+SECRET_MOUNTS+="|GOOGLE_CLIENT_SECRET=google-oauth-client-secret:latest"
+SECRET_MOUNTS+="|DATABASE_URL=database-url:latest"
+maybe_mount_secret() {
+  local ENV_NAME=$1 SECRET_NAME=$2
+  if gcloud secrets versions describe latest --secret="$SECRET_NAME" >/dev/null 2>&1; then
+    SECRET_MOUNTS+="|${ENV_NAME}=${SECRET_NAME}:latest"
+  fi
+}
+maybe_mount_secret GEMINI_API_KEY           gemini-api-key
+maybe_mount_secret RAZORPAY_KEY_ID          razorpay-key-id
+maybe_mount_secret RAZORPAY_KEY_SECRET      razorpay-key-secret
+maybe_mount_secret RAZORPAY_WEBHOOK_SECRET  razorpay-webhook-secret
+
 gcloud run deploy "$API_SERVICE" \
   --source="./backend" \
   --region="$REGION" \
@@ -200,8 +236,8 @@ gcloud run deploy "$API_SERVICE" \
   --cpu=1 \
   --min-instances=0 \
   --max-instances=10 \
-  --set-env-vars="^|^APP_ENV=production|GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}|GOOGLE_REDIRECT_URL=https://${DOMAIN}/auth/google/callback|FRONTEND_URL=https://${DOMAIN}|CORS_ORIGIN=https://${DOMAIN}|POST_LOGIN_REDIRECT=/|COOKIE_SECURE=true|COOKIE_DOMAIN=${DOMAIN}|AGENT_ENABLED=true|GOOGLE_CLOUD_PROJECT=${PROJECT_ID}|GOOGLE_CLOUD_LOCATION=${GOOGLE_CLOUD_LOCATION:-${REGION}}|AGENT_MODEL=${AGENT_MODEL:-gemini-2.5-flash}|STT_LANGUAGE=${STT_LANGUAGE:-en-US}|AUDIO_BUCKET=${AUDIO_BUCKET}|AUDIO_BUCKET_LOCATION=${AUDIO_BUCKET_LOCATION:-${REGION}}|TTS_VOICE=${TTS_VOICE:-en-US-Neural2-D}|ADMIN_EMAILS=${ADMIN_EMAILS}" \
-  --set-secrets="^|^JWT_SECRET=jwt-secret:latest|GOOGLE_CLIENT_SECRET=google-oauth-client-secret:latest|DATABASE_URL=database-url:latest" \
+  --set-env-vars="^|^APP_ENV=production|GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}|GOOGLE_REDIRECT_URL=https://${DOMAIN}/auth/google/callback|FRONTEND_URL=https://${DOMAIN}|CORS_ORIGIN=https://${DOMAIN}|POST_LOGIN_REDIRECT=/|COOKIE_SECURE=true|COOKIE_DOMAIN=${DOMAIN}|AGENT_ENABLED=true|GOOGLE_CLOUD_PROJECT=${PROJECT_ID}|GOOGLE_CLOUD_LOCATION=${GOOGLE_CLOUD_LOCATION:-${REGION}}|AGENT_MODEL=${AGENT_MODEL:-gemini-2.5-flash}|GEMINI_PREMIUM_MODEL=${GEMINI_PREMIUM_MODEL:-gemini-2.5-pro}|STT_LANGUAGE=${STT_LANGUAGE:-en-US}|AUDIO_BUCKET=${AUDIO_BUCKET}|AUDIO_BUCKET_LOCATION=${AUDIO_BUCKET_LOCATION:-${REGION}}|TTS_VOICE=${TTS_VOICE:-en-US-Neural2-D}|TTS_PROMPT_VOICE=${TTS_PROMPT_VOICE:-en-US-Neural2-F}|ADMIN_EMAILS=${ADMIN_EMAILS}|RAZORPAY_PLAN_MONTHLY_ID=${RAZORPAY_PLAN_MONTHLY_ID:-}|RAZORPAY_PLAN_BIANNUAL_ID=${RAZORPAY_PLAN_BIANNUAL_ID:-}" \
+  --set-secrets="^|^${SECRET_MOUNTS}" \
   --quiet
 done_ "${API_SERVICE} deployed"
 

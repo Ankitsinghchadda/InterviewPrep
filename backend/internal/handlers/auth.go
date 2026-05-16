@@ -139,12 +139,19 @@ func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 		response.Err(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
+	isAdmin := auth.IsAdmin(r.Context(), h.AdminEmails)
+	if isAdmin {
+		// Admins are treated as Pro everywhere on the backend (auth middleware,
+		// billing snapshot) — mirror that on the /me payload so the Pro badge
+		// and feature gates light up in the UI without touching the DB row.
+		user.Plan = auth.PlanPro
+	}
 	response.OK(w, http.StatusOK, struct {
 		*models.User
 		IsAdmin bool `json:"isAdmin"`
 	}{
 		User:    user,
-		IsAdmin: auth.IsAdmin(r.Context(), h.AdminEmails),
+		IsAdmin: isAdmin,
 	})
 }
 

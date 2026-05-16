@@ -39,6 +39,25 @@ func (h *SubmissionHandler) Get(w http.ResponseWriter, r *http.Request) {
 	response.OK(w, http.StatusOK, s)
 }
 
+// ListForQuestion returns the caller's submission history for a single
+// question, newest first. Used by QuestionDetail to surface past attempts
+// (so the user can read prior feedback) and to detect an in-flight submission
+// to resume — the frontend filters on status client-side.
+func (h *SubmissionHandler) ListForQuestion(w http.ResponseWriter, r *http.Request) {
+	userID, ok := auth.UserID(r.Context())
+	if !ok {
+		response.Err(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	questionID := chi.URLParam(r, "id")
+	out, err := h.Repo.ListForUserAndQuestion(r.Context(), userID, questionID, 50)
+	if err != nil {
+		response.Err(w, http.StatusInternalServerError, "failed to list submissions")
+		return
+	}
+	response.OK(w, http.StatusOK, out)
+}
+
 func (h *SubmissionHandler) ListMine(w http.ResponseWriter, r *http.Request) {
 	userID, ok := auth.UserID(r.Context())
 	if !ok {

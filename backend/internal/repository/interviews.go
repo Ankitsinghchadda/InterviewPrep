@@ -20,6 +20,7 @@ type CreateInterviewInput struct {
 	CategoryIDs     []string
 	QuestionIDs     []string // ordered list; position assigned from index
 	DurationSeconds int      // live mode only; 0 = no timer
+	JobDescription  string   // live mode only; empty when not provided
 }
 
 // Create persists a new interview and its ordered question links.
@@ -37,12 +38,12 @@ func (r *InterviewRepo) Create(ctx context.Context, in CreateInterviewInput) (*m
 
 	id := uuid.NewString()
 	const q = `
-		INSERT INTO interviews (id, user_id, mode, category_ids, status, duration_seconds)
-		VALUES ($1, $2, $3, $4, 'in_progress', $5)
+		INSERT INTO interviews (id, user_id, mode, category_ids, status, duration_seconds, job_description)
+		VALUES ($1, $2, $3, $4, 'in_progress', $5, $6)
 		RETURNING started_at
 	`
 	var startedAt sql.NullTime
-	if err := tx.QueryRowContext(ctx, q, id, in.UserID, mode, uuidArray(in.CategoryIDs), in.DurationSeconds).Scan(&startedAt); err != nil {
+	if err := tx.QueryRowContext(ctx, q, id, in.UserID, mode, uuidArray(in.CategoryIDs), in.DurationSeconds, in.JobDescription).Scan(&startedAt); err != nil {
 		return nil, err
 	}
 
@@ -71,6 +72,7 @@ func (r *InterviewRepo) Create(ctx context.Context, in CreateInterviewInput) (*m
 		CategoryIDs:     in.CategoryIDs,
 		Status:          "in_progress",
 		DurationSeconds: in.DurationSeconds,
+		JobDescription:  in.JobDescription,
 	}
 	if startedAt.Valid {
 		out.StartedAt = startedAt.Time
@@ -80,7 +82,7 @@ func (r *InterviewRepo) Create(ctx context.Context, in CreateInterviewInput) (*m
 
 func (r *InterviewRepo) Get(ctx context.Context, id, userID string) (*models.Interview, error) {
 	const q = `
-		SELECT id, user_id, mode, category_ids, status, score, summary, started_at, finished_at, duration_seconds
+		SELECT id, user_id, mode, category_ids, status, score, summary, started_at, finished_at, duration_seconds, job_description
 		FROM interviews WHERE id = $1 AND user_id = $2
 	`
 	row := r.DB.QueryRowContext(ctx, q, id, userID)
@@ -97,7 +99,7 @@ func (r *InterviewRepo) ListForUser(ctx context.Context, userID string, limit in
 		limit = 25
 	}
 	const q = `
-		SELECT id, user_id, mode, category_ids, status, score, summary, started_at, finished_at, duration_seconds
+		SELECT id, user_id, mode, category_ids, status, score, summary, started_at, finished_at, duration_seconds, job_description
 		FROM interviews WHERE user_id = $1
 		ORDER BY started_at DESC
 		LIMIT $2
@@ -128,7 +130,7 @@ func scanInterview(row rowScanner) (*models.Interview, error) {
 		fin     sql.NullTime
 	)
 	if err := row.Scan(
-		&iv.ID, &iv.UserID, &iv.Mode, &cats, &iv.Status, &score, &summary, &iv.StartedAt, &fin, &iv.DurationSeconds,
+		&iv.ID, &iv.UserID, &iv.Mode, &cats, &iv.Status, &score, &summary, &iv.StartedAt, &fin, &iv.DurationSeconds, &iv.JobDescription,
 	); err != nil {
 		return nil, err
 	}
