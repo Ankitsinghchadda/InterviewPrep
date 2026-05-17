@@ -14,30 +14,51 @@ interface Plan {
   id: 'monthly' | 'biannual'
   label: string
   priceUSD: number
+  priceINR: number
   intervalLabel: string
-  savings?: string
+  savingsUSD?: string
+  savingsINR?: string
   highlight?: boolean
 }
 
-// Pricing is server-truth via GET /billing/plans, but rendering it here
-// statically lets the page load without an extra fetch. The Razorpay
-// integration in PR4 will use these IDs to mint Subscriptions.
+// Razorpay charges INR (plan currency is fixed on the Razorpay plan). The
+// USD figures are display-only for non-IN visitors — their bank converts at
+// its own FX + foreign-txn fee, so the statement amount will differ by a
+// few percent. Keep priceINR as the source of truth.
 const PLANS: Plan[] = [
   {
     id: 'monthly',
     label: 'Pro Monthly',
     priceUSD: 25,
+    priceINR: 2075,
     intervalLabel: 'per month',
   },
   {
     id: 'biannual',
     label: 'Pro 6-month',
     priceUSD: 100,
+    priceINR: 8300,
     intervalLabel: 'every 6 months',
-    savings: 'Save 33% — equivalent to $16.67/mo',
+    savingsUSD: 'Save 33% — equivalent to $16.67/mo',
+    savingsINR: 'Save 33% — equivalent to ₹1,383/mo',
     highlight: true,
   },
 ]
+
+// India detection via the browser's IANA timezone. VPN/traveling users may
+// be misclassified — acceptable trade-off vs. shipping IP geolocation.
+function detectIndia(): boolean {
+  if (typeof window === 'undefined' || typeof Intl === 'undefined') return false
+  try {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone
+    return tz === 'Asia/Kolkata' || tz === 'Asia/Calcutta'
+  } catch {
+    return false
+  }
+}
+
+const formatINR = (n: number) =>
+  new Intl.NumberFormat('en-IN', { maximumFractionDigits: 0 }).format(n)
 
 const FEATURES: { label: string; free: string; pro: string }[] = [
   { label: 'AI review of recorded answers', free: '3 / week', pro: 'Unlimited' },
@@ -47,7 +68,7 @@ const FEATURES: { label: string; free: string; pro: string }[] = [
   { label: 'AI-generate question packs', free: 'Not available', pro: 'Unlimited' },
   { label: 'AI explanations + answer drafts', free: '10 / week each', pro: 'Unlimited' },
   { label: 'Reference-answer audio (TTS)', free: '10 / week', pro: 'Unlimited' },
-  { label: 'Model', free: 'Gemini 2.5 Flash (Vertex)', pro: 'Gemini 2.5 Pro' },
+  { label: 'Model', free: 'Gemini 2.5 Flash (Vertex)', pro: 'Gemini 3.1 Pro' },
 ]
 
 export function Pricing() {
@@ -56,11 +77,13 @@ export function Pricing() {
   const startCheckout = useStartCheckout()
   const [pendingPlan, setPendingPlan] = useState<'monthly' | 'biannual' | null>(null)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
+  const isIndia = detectIndia()
 
   useSEO({
     title: 'Pricing — 10xInterview Pro: Unlimited AI Mock Interviews',
-    description:
-      'Free to try. Upgrade to Pro for unlimited AI-reviewed answers, mock and live interviews, custom question packs, and Gemini 2.5 Pro feedback. $25/mo or $100 for 6 months.',
+    description: isIndia
+      ? 'Free to try. Upgrade to Pro for unlimited AI-reviewed answers, mock and live interviews, custom question packs, and Gemini 2.5 Pro feedback. ₹2,075/mo or ₹8,300 for 6 months.'
+      : 'Free to try. Upgrade to Pro for unlimited AI-reviewed answers, mock and live interviews, custom question packs, and Gemini 2.5 Pro feedback. $25/mo or $100 for 6 months.',
     path: '/pricing',
     jsonLd: {
       '@context': 'https://schema.org',
@@ -69,10 +92,12 @@ export function Pricing() {
       description:
         'Unlimited AI mock interviews, live practice, custom question packs, and answer reviews scored 0–100.',
       brand: { '@type': 'Brand', name: '10xInterview' },
+      // Both currencies are exposed so search engines surface the right
+      // one by region. Billing currency is always INR; USD is display only.
       offers: [
         {
           '@type': 'Offer',
-          name: 'Pro Monthly',
+          name: 'Pro Monthly (USD)',
           price: '25',
           priceCurrency: 'USD',
           url: 'https://10xinterview.com/pricing',
@@ -80,9 +105,25 @@ export function Pricing() {
         },
         {
           '@type': 'Offer',
-          name: 'Pro 6-month',
+          name: 'Pro Monthly (INR)',
+          price: '2075',
+          priceCurrency: 'INR',
+          url: 'https://10xinterview.com/pricing',
+          availability: 'https://schema.org/InStock',
+        },
+        {
+          '@type': 'Offer',
+          name: 'Pro 6-month (USD)',
           price: '100',
           priceCurrency: 'USD',
+          url: 'https://10xinterview.com/pricing',
+          availability: 'https://schema.org/InStock',
+        },
+        {
+          '@type': 'Offer',
+          name: 'Pro 6-month (INR)',
+          price: '8300',
+          priceCurrency: 'INR',
           url: 'https://10xinterview.com/pricing',
           availability: 'https://schema.org/InStock',
         },
@@ -184,11 +225,30 @@ export function Pricing() {
                 )}
               </div>
               <CardDescription>
-                <span className="text-2xl font-bold text-foreground">${p.priceUSD}</span>{' '}
-                <span className="text-sm text-muted-foreground">{p.intervalLabel}</span>
+                {isIndia ? (
+                  <>
+                    <span className="text-2xl font-bold text-foreground">
+                      ₹{formatINR(p.priceINR)}
+                    </span>{' '}
+                    <span className="text-sm text-muted-foreground">{p.intervalLabel}</span>
+                    <span className="ml-2 text-xs text-muted-foreground">
+                      (~${p.priceUSD} USD)
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <span className="text-2xl font-bold text-foreground">${p.priceUSD}</span>{' '}
+                    <span className="text-sm text-muted-foreground">{p.intervalLabel}</span>
+                    <span className="ml-2 text-xs text-muted-foreground">
+                      (billed as ₹{formatINR(p.priceINR)} INR)
+                    </span>
+                  </>
+                )}
               </CardDescription>
-              {p.savings && (
-                <p className="text-xs text-brand-300">{p.savings}</p>
+              {(isIndia ? p.savingsINR : p.savingsUSD) && (
+                <p className="text-xs text-brand-300">
+                  {isIndia ? p.savingsINR : p.savingsUSD}
+                </p>
               )}
             </CardHeader>
             <CardContent className="mt-auto">
@@ -251,9 +311,20 @@ export function Pricing() {
       </Card>
 
       <div className="rounded-md border border-border/60 bg-muted/20 p-4 text-xs text-muted-foreground sm:text-sm">
-        Payments will be handled by Razorpay. International USD billing is enabled on the Razorpay
-        merchant account, so cards and UPI both work. Cancel anytime — access continues through the
-        end of the billing period.
+        {isIndia ? (
+          <>
+            Payments are processed by Razorpay in INR. Cards, UPI, and netbanking are supported.
+            Cancel anytime — access continues through the end of the billing period.
+          </>
+        ) : (
+          <>
+            Payments are processed by Razorpay and billed in INR (
+            <span className="whitespace-nowrap">~$25 = ₹2,075</span>). International cards are
+            accepted; your bank handles the USD↔INR conversion and may add a small foreign
+            transaction fee, so your statement may show a slightly different amount. Cancel anytime
+            — access continues through the end of the billing period.
+          </>
+        )}
       </div>
 
       {!isPro && (

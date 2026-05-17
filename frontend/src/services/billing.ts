@@ -15,13 +15,19 @@ export async function getUsage(): Promise<UsageSnapshot> {
 export interface PricingPlan {
   id: 'monthly' | 'biannual'
   label: string
+  priceINR: number
   priceUSD: number
   intervalMonths: number
   savingsPct?: number
 }
 
+export interface PricingResponse {
+  plans: PricingPlan[]
+  billingCurrency: 'INR'
+}
+
 export async function getPlans(): Promise<PricingPlan[]> {
-  const { data } = await api.get<ApiEnvelope<{ plans: PricingPlan[] }>>('/billing/plans')
+  const { data } = await api.get<ApiEnvelope<PricingResponse>>('/billing/plans')
   return data.data?.plans ?? []
 }
 

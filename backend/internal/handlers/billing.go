@@ -60,13 +60,31 @@ func (h *BillingHandler) Usage(w http.ResponseWriter, r *http.Request) {
 }
 
 // Plans returns the public price list. Static for now — moves to DB-backed
-// pricing only when we start running price experiments. Kept on this
-// handler so the future POST /billing/checkout shares state with it.
+// pricing only when we start running price experiments.
+//
+// Razorpay charges INR (priceINR is the actual billed amount). priceUSD is
+// display-only for non-IN visitors; the customer's bank does the FX. If we
+// later enable multi-currency on Subscriptions, this endpoint will branch
+// on the requesting country to pick the right plan_id.
 func (h *BillingHandler) Plans(w http.ResponseWriter, _ *http.Request) {
 	response.OK(w, http.StatusOK, map[string]any{
+		"billingCurrency": "INR",
 		"plans": []map[string]any{
-			{"id": "monthly", "label": "Pro Monthly", "priceUSD": 25, "intervalMonths": 1},
-			{"id": "biannual", "label": "Pro 6-month", "priceUSD": 100, "intervalMonths": 6, "savingsPct": 33},
+			{
+				"id":             "monthly",
+				"label":          "Pro Monthly",
+				"priceINR":       2075,
+				"priceUSD":       25,
+				"intervalMonths": 1,
+			},
+			{
+				"id":             "biannual",
+				"label":          "Pro 6-month",
+				"priceINR":       8300,
+				"priceUSD":       100,
+				"intervalMonths": 6,
+				"savingsPct":     33,
+			},
 		},
 	})
 }
