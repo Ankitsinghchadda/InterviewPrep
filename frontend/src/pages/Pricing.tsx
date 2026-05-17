@@ -98,7 +98,7 @@ export function Pricing() {
         {
           '@type': 'Offer',
           name: 'Pro Monthly (USD)',
-          price: '25',
+          price: '24',
           priceCurrency: 'USD',
           url: 'https://10xinterview.com/pricing',
           availability: 'https://schema.org/InStock',
@@ -106,7 +106,7 @@ export function Pricing() {
         {
           '@type': 'Offer',
           name: 'Pro Monthly (INR)',
-          price: '2375',
+          price: '2300',
           priceCurrency: 'INR',
           url: 'https://10xinterview.com/pricing',
           availability: 'https://schema.org/InStock',
@@ -114,7 +114,7 @@ export function Pricing() {
         {
           '@type': 'Offer',
           name: 'Pro 6-month (USD)',
-          price: '100',
+          price: '98',
           priceCurrency: 'USD',
           url: 'https://10xinterview.com/pricing',
           availability: 'https://schema.org/InStock',
@@ -122,7 +122,7 @@ export function Pricing() {
         {
           '@type': 'Offer',
           name: 'Pro 6-month (INR)',
-          price: '9500',
+          price: '9300',
           priceCurrency: 'INR',
           url: 'https://10xinterview.com/pricing',
           availability: 'https://schema.org/InStock',
@@ -319,7 +319,7 @@ export function Pricing() {
         ) : (
           <>
             Payments are processed by Razorpay and billed in INR (
-            <span className="whitespace-nowrap">~$25 = ₹2,375</span>). International cards are
+            <span className="whitespace-nowrap">~$24 = ₹2,300</span>). International cards are
             accepted; your bank handles the USD↔INR conversion and may add a small foreign
             transaction fee, so your statement may show a slightly different amount. Cancel anytime
             — access continues through the end of the billing period.
