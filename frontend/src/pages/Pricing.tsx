@@ -29,18 +29,18 @@ const PLANS: Plan[] = [
   {
     id: 'monthly',
     label: 'Pro Monthly',
-    priceUSD: 25,
-    priceINR: 2075,
+    priceUSD: 24,
+    priceINR: 2300,
     intervalLabel: 'per month',
   },
   {
     id: 'biannual',
     label: 'Pro 6-month',
-    priceUSD: 100,
-    priceINR: 8300,
+    priceUSD: 98,
+    priceINR: 9300,
     intervalLabel: 'every 6 months',
-    savingsUSD: 'Save 33% — equivalent to $16.67/mo',
-    savingsINR: 'Save 33% — equivalent to ₹1,383/mo',
+    savingsUSD: 'Save 33% — equivalent to ~$16/mo',
+    savingsINR: 'Save 33% — equivalent to ₹1,550/mo',
     highlight: true,
   },
 ]
@@ -82,8 +82,8 @@ export function Pricing() {
   useSEO({
     title: 'Pricing — 10xInterview Pro: Unlimited AI Mock Interviews',
     description: isIndia
-      ? 'Free to try. Upgrade to Pro for unlimited AI-reviewed answers, mock and live interviews, custom question packs, and Gemini 2.5 Pro feedback. ₹2,075/mo or ₹8,300 for 6 months.'
-      : 'Free to try. Upgrade to Pro for unlimited AI-reviewed answers, mock and live interviews, custom question packs, and Gemini 2.5 Pro feedback. $25/mo or $100 for 6 months.',
+      ? 'Free to try. Upgrade to Pro for unlimited AI-reviewed answers, mock and live interviews, custom question packs, and Gemini 2.5 Pro feedback. ₹2,300/mo or ₹9,300 for 6 months.'
+      : 'Free to try. Upgrade to Pro for unlimited AI-reviewed answers, mock and live interviews, custom question packs, and Gemini 2.5 Pro feedback. ~$24/mo or ~$98 for 6 months (billed in INR).',
     path: '/pricing',
     jsonLd: {
       '@context': 'https://schema.org',
@@ -106,7 +106,7 @@ export function Pricing() {
         {
           '@type': 'Offer',
           name: 'Pro Monthly (INR)',
-          price: '2075',
+          price: '2375',
           priceCurrency: 'INR',
           url: 'https://10xinterview.com/pricing',
           availability: 'https://schema.org/InStock',
@@ -122,7 +122,7 @@ export function Pricing() {
         {
           '@type': 'Offer',
           name: 'Pro 6-month (INR)',
-          price: '8300',
+          price: '9500',
           priceCurrency: 'INR',
           url: 'https://10xinterview.com/pricing',
           availability: 'https://schema.org/InStock',
@@ -319,7 +319,7 @@ export function Pricing() {
         ) : (
           <>
             Payments are processed by Razorpay and billed in INR (
-            <span className="whitespace-nowrap">~$25 = ₹2,075</span>). International cards are
+            <span className="whitespace-nowrap">~$25 = ₹2,375</span>). International cards are
             accepted; your bank handles the USD↔INR conversion and may add a small foreign
             transaction fee, so your statement may show a slightly different amount. Cancel anytime
             — access continues through the end of the billing period.
